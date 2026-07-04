@@ -156,218 +156,17 @@ const DEFAULT_SETTINGS = {
 };
 
 const INITIAL_TABLES: Table[] = [
-  { id: 1, name: 'Table 1', capacity: 6, maxOverrideCapacity: 6, isOccupied: true, isInactive: false, currentBookingId: 'seed-seated-1', branchId: 'millpark', orderingUrl: 'https://example.com/order?table=1', position: { column: 'right', order: 3 } },
+  { id: 1, name: 'Table 1', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=1', position: { column: 'right', order: 3 } },
   { id: 2, name: 'Table 2', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=2', position: { column: 'right', order: 2 } },
   { id: 3, name: 'Table 3', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=3', position: { column: 'right', order: 1 } },
   { id: 4, name: 'Table 4', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=4', position: { column: 'top', order: 1 } },
   { id: 5, name: 'Table 5', capacity: 2, maxOverrideCapacity: 3, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=5', position: { column: 'middle', order: 1, isDiamond: true } },
-  { id: 6, name: 'Table 6', capacity: 2, maxOverrideCapacity: 3, isOccupied: true, isInactive: false, currentBookingId: 'seed-seated-2', branchId: 'millpark', orderingUrl: 'https://example.com/order?table=6', position: { column: 'middle', order: 2, isDiamond: true } },
+  { id: 6, name: 'Table 6', capacity: 2, maxOverrideCapacity: 3, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=6', position: { column: 'middle', order: 2, isDiamond: true } },
   { id: 7, name: 'Table 7', capacity: 2, maxOverrideCapacity: 3, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=7', position: { column: 'middle', order: 3, isDiamond: true } },
   { id: 8, name: 'Table 8', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=8', position: { column: 'left', order: 3 } },
   { id: 9, name: 'Table 9', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=9', position: { column: 'left', order: 2 } },
   { id: 10, name: 'Table 10', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=10', position: { column: 'left', order: 1 } },
 ];
-
-function getInitialBookingsSeed(): Booking[] {
-  const now = new Date();
-  const todayStr = now.toISOString().split('T')[0];
-  const tomorrowStr = new Date(now.getTime() + 86400000).toISOString().split('T')[0];
-  return [
-    {
-      id: 'seed-seated-1',
-      phone: '0422 333 444',
-      firstName: 'Vikram',
-      lastName: 'Sharma',
-      partySize: 4,
-      childSeats: 1,
-      whatsappOptIn: true,
-      type: 'walk-in',
-      status: 'seated',
-      createdAt: new Date(now.getTime() - 45 * 60000).toISOString(),
-      seatedAt: new Date(now.getTime() - 30 * 60000).toISOString(),
-      tableId: 1,
-      branchId: 'millpark',
-    },
-    {
-      id: 'seed-seated-2',
-      phone: '0466 777 888',
-      firstName: 'Arjun',
-      lastName: 'Reddy',
-      partySize: 2,
-      childSeats: 0,
-      whatsappOptIn: true,
-      type: 'walk-in',
-      status: 'seated',
-      createdAt: new Date(now.getTime() - 35 * 60000).toISOString(),
-      seatedAt: new Date(now.getTime() - 20 * 60000).toISOString(),
-      tableId: 6,
-      branchId: 'millpark',
-    },
-    {
-      id: 'seed-wait-1',
-      phone: '0411 222 333',
-      firstName: 'Priya',
-      lastName: 'Nair',
-      partySize: 3,
-      childSeats: 1,
-      whatsappOptIn: true,
-      type: 'walk-in',
-      status: 'waiting',
-      createdAt: new Date(now.getTime() - 14 * 60000).toISOString(),
-      estimatedWaitMinutes: 15,
-      branchId: 'millpark',
-    },
-    {
-      id: 'seed-wait-2',
-      phone: '0455 666 777',
-      firstName: 'Sarah',
-      lastName: 'Jenkins',
-      partySize: 2,
-      childSeats: 0,
-      whatsappOptIn: true,
-      type: 'walk-in',
-      status: 'waiting',
-      createdAt: new Date(now.getTime() - 6 * 60000).toISOString(),
-      estimatedWaitMinutes: 20,
-      branchId: 'millpark',
-    },
-    {
-      id: 'seed-book-1',
-      phone: '0433 444 555',
-      firstName: 'Ananya',
-      lastName: 'Rao',
-      partySize: 5,
-      childSeats: 2,
-      whatsappOptIn: false,
-      type: 'remote',
-      status: 'pending',
-      createdAt: new Date(now.getTime() - 120 * 60000).toISOString(),
-      bookingDate: todayStr,
-      bookingTime: '18:30',
-      branchId: 'millpark',
-      isNewAlert: true,
-    },
-    {
-      id: 'seed-book-2',
-      phone: '0444 555 666',
-      firstName: 'Rahul',
-      lastName: 'Varma',
-      partySize: 4,
-      childSeats: 0,
-      whatsappOptIn: true,
-      type: 'remote',
-      status: 'confirmed',
-      createdAt: new Date(now.getTime() - 300 * 60000).toISOString(),
-      bookingDate: todayStr,
-      bookingTime: '19:15',
-      branchId: 'millpark',
-      isNewAlert: false,
-    },
-    {
-      id: 'seed-book-3',
-      phone: '0411 222 333',
-      firstName: 'Priya',
-      lastName: 'Nair',
-      partySize: 6,
-      childSeats: 1,
-      whatsappOptIn: true,
-      type: 'remote',
-      status: 'pending',
-      createdAt: new Date(now.getTime() - 60 * 60000).toISOString(),
-      bookingDate: todayStr,
-      bookingTime: '19:45',
-      branchId: 'millpark',
-      isNewAlert: true,
-    },
-    {
-      id: 'seed-book-4',
-      phone: '0422 333 444',
-      firstName: 'Vikram',
-      lastName: 'Sharma',
-      partySize: 2,
-      childSeats: 0,
-      whatsappOptIn: true,
-      type: 'remote',
-      status: 'declined',
-      createdAt: new Date(now.getTime() - 500 * 60000).toISOString(),
-      bookingDate: tomorrowStr,
-      bookingTime: '20:00',
-      branchId: 'millpark',
-      isNewAlert: false,
-    }
-  ];
-}
-
-function getInitialCustomersSeed(): Record<string, Customer> {
-  return {
-    '0411222333': {
-      phone: '0411 222 333',
-      firstName: 'Priya',
-      lastName: 'Nair',
-      totalVisits: 6,
-      lastVisitDate: new Date(Date.now() - 3600000 * 24 * 2).toISOString(),
-      noShowCount: 0,
-      cancellationCount: 0,
-      whatsappOptIn: true,
-      branchId: 'millpark',
-    },
-    '0422333444': {
-      phone: '0422 333 444',
-      firstName: 'Vikram',
-      lastName: 'Sharma',
-      totalVisits: 12,
-      lastVisitDate: new Date(Date.now() - 3600000 * 2).toISOString(),
-      noShowCount: 0,
-      cancellationCount: 0,
-      whatsappOptIn: true,
-      branchId: 'millpark',
-    },
-    '0433444555': {
-      phone: '0433 444 555',
-      firstName: 'Ananya',
-      lastName: 'Rao',
-      totalVisits: 5,
-      lastVisitDate: new Date(Date.now() - 3600000 * 24 * 7).toISOString(),
-      noShowCount: 1,
-      cancellationCount: 0,
-      whatsappOptIn: false,
-      branchId: 'millpark',
-    },
-    '0444555666': {
-      phone: '0444 555 666',
-      firstName: 'Rahul',
-      lastName: 'Varma',
-      totalVisits: 2,
-      lastVisitDate: new Date(Date.now() - 3600000 * 24 * 14).toISOString(),
-      noShowCount: 0,
-      cancellationCount: 0,
-      whatsappOptIn: true,
-      branchId: 'millpark',
-    },
-    '0455666777': {
-      phone: '0455 666 777',
-      firstName: 'Sarah',
-      lastName: 'Jenkins',
-      totalVisits: 1,
-      lastVisitDate: new Date().toISOString(),
-      noShowCount: 0,
-      cancellationCount: 1,
-      whatsappOptIn: true,
-      branchId: 'millpark',
-    },
-    '0466777888': {
-      phone: '0466 777 888',
-      firstName: 'Arjun',
-      lastName: 'Reddy',
-      totalVisits: 8,
-      lastVisitDate: new Date().toISOString(),
-      noShowCount: 0,
-      cancellationCount: 0,
-      whatsappOptIn: true,
-      branchId: 'millpark',
-    }
-  };
-}
 
 // ----------------------------------------------------
 // REAL-TIME FIRESTORE SYNCHRONIZATION ENGINE
@@ -424,10 +223,8 @@ function initFirestoreSync() {
   onSnapshot(bookingsColRef, async (querySnap) => {
     try {
       if (querySnap.empty) {
-        const initialBookings = getInitialBookingsSeed();
-        for (const b of initialBookings) {
-          await safeSetDoc(doc(db, 'bookings', b.id), b);
-        }
+        cachedBookings = [];
+        notifyListeners();
       } else {
         const bookings: Booking[] = [];
         querySnap.forEach((doc) => {
@@ -448,10 +245,8 @@ function initFirestoreSync() {
   onSnapshot(customersColRef, async (querySnap) => {
     try {
       if (querySnap.empty) {
-        const initialCustomers = getInitialCustomersSeed();
-        for (const [phone, c] of Object.entries(initialCustomers)) {
-          await safeSetDoc(doc(db, 'customers', phone), c);
-        }
+        cachedCustomers = {};
+        notifyListeners();
       } else {
         const customers: Record<string, Customer> = {};
         querySnap.forEach((doc) => {

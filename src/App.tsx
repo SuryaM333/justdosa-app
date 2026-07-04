@@ -159,7 +159,7 @@ export default function App() {
   const handleResetDemo = () => {
     dataService.resetToSeedData();
     localStorage.removeItem('just_dosa_active_customer_booking_id');
-    setToastMsg('Demo database reset successfully!');
+    setToastMsg('Database cleared and reset successfully!');
     setTimeout(() => setToastMsg(null), 3000);
   };
 

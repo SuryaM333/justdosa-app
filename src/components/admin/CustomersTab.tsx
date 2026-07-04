@@ -146,7 +146,14 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, adminRole
           <span>Loyalty & CRM Controls</span>
         </div>
 
-        {sorted.length === 0 ? (
+        {customerList.length === 0 ? (
+          <div className="p-12 text-center text-[#6B5E4C] text-sm space-y-2">
+            <p className="font-serif font-bold text-[#2D2926] dark:text-white text-base">No customers yet</p>
+            <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0] max-w-sm mx-auto">
+              As guests make bookings or join the waiting queue, their loyalty profiles and visit history will automatically appear here.
+            </p>
+          </div>
+        ) : sorted.length === 0 ? (
           <div className="p-12 text-center text-[#6B5E4C] text-sm">
             No customer records found matching "{searchTerm}".
           </div>

@@ -63,10 +63,10 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {/* Reset Demo Data Button (Subtle tool for tester) */}
+          {/* Reset Database Button (Subtle tool to clear live data) */}
           <button
             onClick={onResetDemo}
-            title="Reset Demo Data to Initial State"
+            title="Clear and Reset Database"
             className="p-2 rounded-xl text-[#6B5E4C] hover:text-[#E37A08] dark:text-[#B8ACA0] dark:hover:text-[#D2B48C] hover:bg-[#F5F2EA] dark:hover:bg-[#26221E] transition-colors border border-transparent hover:border-[#E8E2D2]"
           >
             <RotateCcw className="w-4 h-4" />

@@ -168,7 +168,7 @@ export const SettingsTab: React.FC = () => {
                   maxLength={4}
                   value={newStaffPin}
                   onChange={(e) => setNewStaffPin(e.target.value)}
-                  placeholder="e.g. 1357"
+                  placeholder="••••"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-[#F5F2EA] dark:bg-[#1C1917] text-sm font-mono text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
                 />
               </div>
@@ -247,7 +247,7 @@ export const SettingsTab: React.FC = () => {
                   maxLength={4}
                   value={newOwnerPin}
                   onChange={(e) => setNewOwnerPin(e.target.value)}
-                  placeholder="e.g. 2468"
+                  placeholder="••••"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-[#F5F2EA] dark:bg-[#1C1917] text-sm font-mono text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
                 />
               </div>
