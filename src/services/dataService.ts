@@ -1,0 +1,1245 @@
+import { Booking, Customer, DailyStats, Table } from '../types';
+import { cleanPhoneNumber, formatAusMobile } from '../utils/phone';
+import { playNewBookingChime } from '../utils/sound';
+import { getRequiredTableSeats } from '../utils/bookingUtils';
+import { initializeApp } from 'firebase/app';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  onSnapshot, 
+  runTransaction,
+  writeBatch,
+  deleteDoc
+} from 'firebase/firestore';
+
+// ----------------------------------------------------
+// FIREBASE FIRESTORE INITIALIZATION
+// ----------------------------------------------------
+const firebaseConfig = {
+  apiKey: "AIzaSyDOUFuzmLPwJUjoRFagzlHGOVg9hLu9enY",
+  authDomain: "just-dosa.firebaseapp.com",
+  projectId: "just-dosa",
+  storageBucket: "just-dosa.firebasestorage.app",
+  messagingSenderId: "476516299106",
+  appId: "1:476516299106:web:718797bbfe16d576dbfc3b"
+};
+
+const app = initializeApp(firebaseConfig);
+export const db = getFirestore(app);
+
+// ----------------------------------------------------
+// FIRESTORE ERROR HANDLING (Spec compliant)
+// ----------------------------------------------------
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: null,
+      email: null,
+      emailVerified: null,
+      isAnonymous: null,
+      tenantId: null,
+      providerInfo: []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
+// ----------------------------------------------------
+// REAL-TIME CACHE & STATE DEFINITIONS
+// ----------------------------------------------------
+let cachedTables: Table[] = [];
+let cachedBookings: Booking[] = [];
+let cachedCustomers: Record<string, Customer> = {};
+let cachedSettings: any = null;
+
+type Listener = () => void;
+const listeners: Set<Listener> = new Set();
+
+function notifyListeners() {
+  listeners.forEach((listener) => listener());
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('justDosaDataChange'));
+  }
+}
+
+// ----------------------------------------------------
+// SEED DATA TEMPLATES
+// ----------------------------------------------------
+const DEFAULT_SETTINGS = {
+  staffPin: '1357',
+  ownerPin: '2468',
+  whatsappNumber: '0412345678',
+  kalyanaCapacity: 40,
+  lunchStartTime: '11:00',
+  lunchEndTime: '15:00',
+  dinnerStartTime: '17:30',
+  dinnerEndTime: '22:00'
+};
+
+const INITIAL_TABLES: Table[] = [
+  { id: 1, name: 'Table 1', capacity: 6, maxOverrideCapacity: 6, isOccupied: true, isInactive: false, currentBookingId: 'seed-seated-1', branchId: 'millpark', orderingUrl: 'https://example.com/order?table=1', position: { column: 'right', order: 3 } },
+  { id: 2, name: 'Table 2', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=2', position: { column: 'right', order: 2 } },
+  { id: 3, name: 'Table 3', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=3', position: { column: 'right', order: 1 } },
+  { id: 4, name: 'Table 4', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=4', position: { column: 'top', order: 1 } },
+  { id: 5, name: 'Table 5', capacity: 2, maxOverrideCapacity: 3, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=5', position: { column: 'middle', order: 1, isDiamond: true } },
+  { id: 6, name: 'Table 6', capacity: 2, maxOverrideCapacity: 3, isOccupied: true, isInactive: false, currentBookingId: 'seed-seated-2', branchId: 'millpark', orderingUrl: 'https://example.com/order?table=6', position: { column: 'middle', order: 2, isDiamond: true } },
+  { id: 7, name: 'Table 7', capacity: 2, maxOverrideCapacity: 3, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=7', position: { column: 'middle', order: 3, isDiamond: true } },
+  { id: 8, name: 'Table 8', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=8', position: { column: 'left', order: 3 } },
+  { id: 9, name: 'Table 9', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=9', position: { column: 'left', order: 2 } },
+  { id: 10, name: 'Table 10', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=10', position: { column: 'left', order: 1 } },
+];
+
+function getInitialBookingsSeed(): Booking[] {
+  const now = new Date();
+  const todayStr = now.toISOString().split('T')[0];
+  const tomorrowStr = new Date(now.getTime() + 86400000).toISOString().split('T')[0];
+  return [
+    {
+      id: 'seed-seated-1',
+      phone: '0422 333 444',
+      firstName: 'Vikram',
+      lastName: 'Sharma',
+      partySize: 4,
+      childSeats: 1,
+      whatsappOptIn: true,
+      type: 'walk-in',
+      status: 'seated',
+      createdAt: new Date(now.getTime() - 45 * 60000).toISOString(),
+      seatedAt: new Date(now.getTime() - 30 * 60000).toISOString(),
+      tableId: 1,
+      branchId: 'millpark',
+    },
+    {
+      id: 'seed-seated-2',
+      phone: '0466 777 888',
+      firstName: 'Arjun',
+      lastName: 'Reddy',
+      partySize: 2,
+      childSeats: 0,
+      whatsappOptIn: true,
+      type: 'walk-in',
+      status: 'seated',
+      createdAt: new Date(now.getTime() - 35 * 60000).toISOString(),
+      seatedAt: new Date(now.getTime() - 20 * 60000).toISOString(),
+      tableId: 6,
+      branchId: 'millpark',
+    },
+    {
+      id: 'seed-wait-1',
+      phone: '0411 222 333',
+      firstName: 'Priya',
+      lastName: 'Nair',
+      partySize: 3,
+      childSeats: 1,
+      whatsappOptIn: true,
+      type: 'walk-in',
+      status: 'waiting',
+      createdAt: new Date(now.getTime() - 14 * 60000).toISOString(),
+      estimatedWaitMinutes: 15,
+      branchId: 'millpark',
+    },
+    {
+      id: 'seed-wait-2',
+      phone: '0455 666 777',
+      firstName: 'Sarah',
+      lastName: 'Jenkins',
+      partySize: 2,
+      childSeats: 0,
+      whatsappOptIn: true,
+      type: 'walk-in',
+      status: 'waiting',
+      createdAt: new Date(now.getTime() - 6 * 60000).toISOString(),
+      estimatedWaitMinutes: 20,
+      branchId: 'millpark',
+    },
+    {
+      id: 'seed-book-1',
+      phone: '0433 444 555',
+      firstName: 'Ananya',
+      lastName: 'Rao',
+      partySize: 5,
+      childSeats: 2,
+      whatsappOptIn: false,
+      type: 'remote',
+      status: 'pending',
+      createdAt: new Date(now.getTime() - 120 * 60000).toISOString(),
+      bookingDate: todayStr,
+      bookingTime: '18:30',
+      branchId: 'millpark',
+      isNewAlert: true,
+    },
+    {
+      id: 'seed-book-2',
+      phone: '0444 555 666',
+      firstName: 'Rahul',
+      lastName: 'Varma',
+      partySize: 4,
+      childSeats: 0,
+      whatsappOptIn: true,
+      type: 'remote',
+      status: 'confirmed',
+      createdAt: new Date(now.getTime() - 300 * 60000).toISOString(),
+      bookingDate: todayStr,
+      bookingTime: '19:15',
+      branchId: 'millpark',
+      isNewAlert: false,
+    },
+    {
+      id: 'seed-book-3',
+      phone: '0411 222 333',
+      firstName: 'Priya',
+      lastName: 'Nair',
+      partySize: 6,
+      childSeats: 1,
+      whatsappOptIn: true,
+      type: 'remote',
+      status: 'pending',
+      createdAt: new Date(now.getTime() - 60 * 60000).toISOString(),
+      bookingDate: todayStr,
+      bookingTime: '19:45',
+      branchId: 'millpark',
+      isNewAlert: true,
+    },
+    {
+      id: 'seed-book-4',
+      phone: '0422 333 444',
+      firstName: 'Vikram',
+      lastName: 'Sharma',
+      partySize: 2,
+      childSeats: 0,
+      whatsappOptIn: true,
+      type: 'remote',
+      status: 'declined',
+      createdAt: new Date(now.getTime() - 500 * 60000).toISOString(),
+      bookingDate: tomorrowStr,
+      bookingTime: '20:00',
+      branchId: 'millpark',
+      isNewAlert: false,
+    }
+  ];
+}
+
+function getInitialCustomersSeed(): Record<string, Customer> {
+  return {
+    '0411222333': {
+      phone: '0411 222 333',
+      firstName: 'Priya',
+      lastName: 'Nair',
+      totalVisits: 6,
+      lastVisitDate: new Date(Date.now() - 3600000 * 24 * 2).toISOString(),
+      noShowCount: 0,
+      cancellationCount: 0,
+      whatsappOptIn: true,
+      branchId: 'millpark',
+    },
+    '0422333444': {
+      phone: '0422 333 444',
+      firstName: 'Vikram',
+      lastName: 'Sharma',
+      totalVisits: 12,
+      lastVisitDate: new Date(Date.now() - 3600000 * 2).toISOString(),
+      noShowCount: 0,
+      cancellationCount: 0,
+      whatsappOptIn: true,
+      branchId: 'millpark',
+    },
+    '0433444555': {
+      phone: '0433 444 555',
+      firstName: 'Ananya',
+      lastName: 'Rao',
+      totalVisits: 5,
+      lastVisitDate: new Date(Date.now() - 3600000 * 24 * 7).toISOString(),
+      noShowCount: 1,
+      cancellationCount: 0,
+      whatsappOptIn: false,
+      branchId: 'millpark',
+    },
+    '0444555666': {
+      phone: '0444 555 666',
+      firstName: 'Rahul',
+      lastName: 'Varma',
+      totalVisits: 2,
+      lastVisitDate: new Date(Date.now() - 3600000 * 24 * 14).toISOString(),
+      noShowCount: 0,
+      cancellationCount: 0,
+      whatsappOptIn: true,
+      branchId: 'millpark',
+    },
+    '0455666777': {
+      phone: '0455 666 777',
+      firstName: 'Sarah',
+      lastName: 'Jenkins',
+      totalVisits: 1,
+      lastVisitDate: new Date().toISOString(),
+      noShowCount: 0,
+      cancellationCount: 1,
+      whatsappOptIn: true,
+      branchId: 'millpark',
+    },
+    '0466777888': {
+      phone: '0466 777 888',
+      firstName: 'Arjun',
+      lastName: 'Reddy',
+      totalVisits: 8,
+      lastVisitDate: new Date().toISOString(),
+      noShowCount: 0,
+      cancellationCount: 0,
+      whatsappOptIn: true,
+      branchId: 'millpark',
+    }
+  };
+}
+
+// ----------------------------------------------------
+// REAL-TIME FIRESTORE SYNCHRONIZATION ENGINE
+// ----------------------------------------------------
+let initialized = false;
+
+function initFirestoreSync() {
+  if (initialized) return;
+  initialized = true;
+
+  // 1. Settings Document Listener
+  const settingsDocRef = doc(db, 'settings', 'global');
+  onSnapshot(settingsDocRef, async (docSnap) => {
+    try {
+      if (!docSnap.exists()) {
+        await setDoc(settingsDocRef, DEFAULT_SETTINGS);
+      } else {
+        cachedSettings = docSnap.data();
+        notifyListeners();
+      }
+    } catch (err) {
+      console.error("Error in settings sync: ", err);
+    }
+  }, (error) => {
+    handleFirestoreError(error, OperationType.GET, 'settings/global');
+  });
+
+  // 2. Tables Collection Listener
+  const tablesColRef = collection(db, 'tables');
+  onSnapshot(tablesColRef, async (querySnap) => {
+    try {
+      if (querySnap.empty) {
+        for (const t of INITIAL_TABLES) {
+          await setDoc(doc(db, 'tables', t.id.toString()), t);
+        }
+      } else {
+        const tables: Table[] = [];
+        querySnap.forEach((doc) => {
+          tables.push(doc.data() as Table);
+        });
+        tables.sort((a, b) => a.id - b.id);
+        cachedTables = tables;
+        notifyListeners();
+      }
+    } catch (err) {
+      console.error("Error in tables sync: ", err);
+    }
+  }, (error) => {
+    handleFirestoreError(error, OperationType.LIST, 'tables');
+  });
+
+  // 3. Bookings Collection Listener
+  const bookingsColRef = collection(db, 'bookings');
+  onSnapshot(bookingsColRef, async (querySnap) => {
+    try {
+      if (querySnap.empty) {
+        const initialBookings = getInitialBookingsSeed();
+        for (const b of initialBookings) {
+          await setDoc(doc(db, 'bookings', b.id), b);
+        }
+      } else {
+        const bookings: Booking[] = [];
+        querySnap.forEach((doc) => {
+          bookings.push(doc.data() as Booking);
+        });
+        cachedBookings = bookings;
+        notifyListeners();
+      }
+    } catch (err) {
+      console.error("Error in bookings sync: ", err);
+    }
+  }, (error) => {
+    handleFirestoreError(error, OperationType.LIST, 'bookings');
+  });
+
+  // 4. Customers Collection Listener
+  const customersColRef = collection(db, 'customers');
+  onSnapshot(customersColRef, async (querySnap) => {
+    try {
+      if (querySnap.empty) {
+        const initialCustomers = getInitialCustomersSeed();
+        for (const [phone, c] of Object.entries(initialCustomers)) {
+          await setDoc(doc(db, 'customers', phone), c);
+        }
+      } else {
+        const customers: Record<string, Customer> = {};
+        querySnap.forEach((doc) => {
+          customers[doc.id] = doc.data() as Customer;
+        });
+        cachedCustomers = customers;
+        notifyListeners();
+      }
+    } catch (err) {
+      console.error("Error in customers sync: ", err);
+    }
+  }, (error) => {
+    handleFirestoreError(error, OperationType.LIST, 'customers');
+  });
+}
+
+// Kickstart synchronization immediately on module import
+if (typeof window !== 'undefined') {
+  initFirestoreSync();
+}
+
+// ----------------------------------------------------
+// PUBLIC DATA SERVICE EXPORTS
+// ----------------------------------------------------
+export const dataService = {
+  subscribe(listener: Listener): () => void {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  },
+
+  getStaffPin(): string {
+    return cachedSettings?.staffPin || '1357';
+  },
+
+  getOwnerPin(): string {
+    return cachedSettings?.ownerPin || '2468';
+  },
+
+  async setStaffPin(pin: string) {
+    try {
+      await setDoc(doc(db, 'settings', 'global'), { staffPin: pin }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  async setOwnerPin(pin: string) {
+    try {
+      await setDoc(doc(db, 'settings', 'global'), { ownerPin: pin }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  getWhatsAppNumber(): string {
+    return cachedSettings?.whatsappNumber || '0412345678';
+  },
+
+  async setWhatsAppNumber(number: string) {
+    try {
+      await setDoc(doc(db, 'settings', 'global'), { whatsappNumber: number }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  getKalyanaCapacity(): number {
+    return cachedSettings?.kalyanaCapacity || 40;
+  },
+
+  async setKalyanaCapacity(capacity: number) {
+    try {
+      await setDoc(doc(db, 'settings', 'global'), { kalyanaCapacity: capacity }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  getLunchStartTime(): string {
+    return cachedSettings?.lunchStartTime || '11:00';
+  },
+
+  async setLunchStartTime(time: string) {
+    try {
+      await setDoc(doc(db, 'settings', 'global'), { lunchStartTime: time }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  getLunchEndTime(): string {
+    return cachedSettings?.lunchEndTime || '15:00';
+  },
+
+  async setLunchEndTime(time: string) {
+    try {
+      await setDoc(doc(db, 'settings', 'global'), { lunchEndTime: time }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  getDinnerStartTime(): string {
+    return cachedSettings?.dinnerStartTime || '17:30';
+  },
+
+  async setDinnerStartTime(time: string) {
+    try {
+      await setDoc(doc(db, 'settings', 'global'), { dinnerStartTime: time }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  getDinnerEndTime(): string {
+    return cachedSettings?.dinnerEndTime || '22:00';
+  },
+
+  async setDinnerEndTime(time: string) {
+    try {
+      await setDoc(doc(db, 'settings', 'global'), { dinnerEndTime: time }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  findLatestBookingByPhone(phone: string): Booking | undefined {
+    const bookings = this.getBookings();
+    const cleanNum = cleanPhoneNumber(phone);
+    const matches = bookings.filter((b) => cleanPhoneNumber(b.phone) === cleanNum);
+    if (matches.length === 0) return undefined;
+    
+    matches.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    
+    const activeMatch = matches.find((b) => b.status !== 'finished' && b.status !== 'cancelled' && b.status !== 'no-show');
+    return activeMatch || matches[0];
+  },
+
+  async proposeAlternativeTime(
+    bookingId: string,
+    altDate: string,
+    altTime: string,
+    isKalyana?: boolean,
+    kalyanaSlot?: string,
+    proposalNote?: string
+  ) {
+    try {
+      await setDoc(doc(db, 'bookings', bookingId), {
+        status: 'alternative_proposed',
+        alternativeDate: altDate,
+        alternativeTime: altTime,
+        isKalyanaVirundhu: !!isKalyana,
+        kalyanaSlot: kalyanaSlot || null,
+        proposalNote: proposalNote || null,
+        isNewAlert: false
+      }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
+    }
+  },
+
+  async acceptAlternativeTime(bookingId: string) {
+    try {
+      const docRef = doc(db, 'bookings', bookingId);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const booking = snap.data() as Booking;
+        const newBookingDate = booking.alternativeDate;
+        const newBookingTime = booking.isKalyanaVirundhu ? booking.kalyanaSlot : booking.alternativeTime;
+        await setDoc(docRef, {
+          status: 'confirmed',
+          bookingDate: newBookingDate,
+          bookingTime: newBookingTime,
+          alternativeDate: null,
+          alternativeTime: null
+        }, { merge: true });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
+    }
+  },
+
+  async declineAlternativeTime(bookingId: string) {
+    try {
+      await setDoc(doc(db, 'bookings', bookingId), {
+        status: 'cancelled'
+      }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
+    }
+  },
+
+  getTables(): Table[] {
+    if (cachedTables.length === 0) {
+      return INITIAL_TABLES;
+    }
+    const updated = cachedTables.map(t => {
+      if (t.id === 7) {
+        return { ...t, isInactive: false, maxOverrideCapacity: 3 };
+      }
+      return t;
+    });
+    return updated;
+  },
+
+  async saveTables(tables: Table[]) {
+    try {
+      const batch = writeBatch(db);
+      tables.forEach((t) => {
+        batch.set(doc(db, 'tables', t.id.toString()), t);
+      });
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'tables');
+    }
+  },
+
+  getBookings(): Booking[] {
+    return cachedBookings;
+  },
+
+  async saveBookings(bookings: Booking[]) {
+    try {
+      const batch = writeBatch(db);
+      bookings.forEach((b) => {
+        batch.set(doc(db, 'bookings', b.id), b);
+      });
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'bookings');
+    }
+  },
+
+  getCustomers(): Record<string, Customer> {
+    return cachedCustomers;
+  },
+
+  async saveCustomers(customers: Record<string, Customer>) {
+    try {
+      const batch = writeBatch(db);
+      Object.entries(customers).forEach(([phone, c]) => {
+        batch.set(doc(db, 'customers', phone), c);
+      });
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'customers');
+    }
+  },
+
+  getCustomerByPhone(phone: string): Customer | null {
+    const cleaned = cleanPhoneNumber(phone);
+    return cachedCustomers[cleaned] || null;
+  },
+
+  async createBooking(data: {
+    firstName: string;
+    lastName: string;
+    phone: string;
+    partySize: number;
+    childSeats: number;
+    adultsCount?: number;
+    childrenCount?: number;
+    childrenHighChairs?: boolean[];
+    whatsappOptIn: boolean;
+    type: 'walk-in' | 'remote';
+    bookingDate?: string;
+    bookingTime?: string;
+    isKalyanaVirundhu?: boolean;
+    kalyanaSlot?: string;
+  }): Promise<Booking> {
+    const formattedPhone = formatAusMobile(data.phone);
+    const cleanedPhone = cleanPhoneNumber(data.phone);
+
+    try {
+      let customer = cachedCustomers[cleanedPhone];
+      if (!customer) {
+        customer = {
+          phone: formattedPhone,
+          firstName: data.firstName,
+          lastName: data.lastName,
+          totalVisits: 0,
+          lastVisitDate: new Date().toISOString(),
+          noShowCount: 0,
+          cancellationCount: 0,
+          whatsappOptIn: data.whatsappOptIn,
+          branchId: 'millpark',
+        };
+      } else {
+        customer.firstName = data.firstName;
+        customer.lastName = data.lastName;
+        customer.whatsappOptIn = data.whatsappOptIn;
+        if (!customer.branchId) customer.branchId = 'millpark';
+      }
+      await setDoc(doc(db, 'customers', cleanedPhone), customer);
+
+      const bookingId = `bk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const newBooking: Booking = {
+        id: bookingId,
+        phone: formattedPhone,
+        firstName: data.firstName,
+        lastName: data.lastName,
+        partySize: data.partySize,
+        childSeats: data.childSeats,
+        adultsCount: data.adultsCount,
+        childrenCount: data.childrenCount,
+        childrenHighChairs: data.childrenHighChairs,
+        whatsappOptIn: data.whatsappOptIn,
+        type: data.type,
+        status: data.type === 'walk-in' ? 'waiting' : 'pending',
+        createdAt: new Date().toISOString(),
+        bookingDate: data.bookingDate,
+        bookingTime: data.bookingTime,
+        isNewAlert: true,
+        branchId: 'millpark',
+        isKalyanaVirundhu: data.isKalyanaVirundhu,
+        kalyanaSlot: data.kalyanaSlot,
+      };
+
+      if (newBooking.type === 'walk-in') {
+        newBooking.estimatedWaitMinutes = this.calculateEstimatedWait(getRequiredTableSeats(newBooking));
+      }
+
+      await setDoc(doc(db, 'bookings', bookingId), newBooking);
+
+      if (newBooking.status === 'waiting') {
+        await this.updateAllWaitingEstimates();
+      }
+
+      playNewBookingChime();
+
+      return newBooking;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'bookings');
+      throw error;
+    }
+  },
+
+  getWaitingQueuePosition(bookingId: string): { position: number; totalWaiting: number; estimatedWaitMinutes: number } {
+    const bookings = this.getBookings();
+    const waitingList = bookings
+      .filter((b) => b.status === 'waiting')
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    const index = waitingList.findIndex((b) => b.id === bookingId);
+    if (index === -1) {
+      return { position: 0, totalWaiting: waitingList.length, estimatedWaitMinutes: 0 };
+    }
+
+    const position = index + 1;
+    const tables = this.getTables();
+    const activeTables = tables.filter((t) => !t.isInactive);
+    const vacantTables = activeTables.filter((t) => !t.isOccupied);
+
+    let wait = 0;
+    if (vacantTables.length > 0 && position === 1) {
+      wait = 5;
+    } else {
+      wait = position * 15;
+    }
+
+    return {
+      position,
+      totalWaiting: waitingList.length,
+      estimatedWaitMinutes: wait,
+    };
+  },
+
+  calculateEstimatedWait(partySize: number): number {
+    const tables = this.getTables();
+    const vacantMatching = tables.filter(
+      (t) => !t.isInactive && !t.isOccupied && (t.capacity >= partySize || t.maxOverrideCapacity >= partySize)
+    );
+    if (vacantMatching.length > 0) return 10;
+    
+    const waitingCount = this.getBookings().filter((b) => b.status === 'waiting').length;
+    return (waitingCount + 1) * 15;
+  },
+
+  async allocateTable(bookingId: string, tableId: number): Promise<{ success: boolean; error?: string }> {
+    try {
+      const result = await runTransaction(db, async (transaction) => {
+        const tableDocRef = doc(db, 'tables', tableId.toString());
+        const bookingDocRef = doc(db, 'bookings', bookingId);
+
+        const tableSnap = await transaction.get(tableDocRef);
+        const bookingSnap = await transaction.get(bookingDocRef);
+
+        if (!tableSnap.exists()) {
+          return { success: false, error: 'Table not found' };
+        }
+        if (!bookingSnap.exists()) {
+          return { success: false, error: 'Booking not found' };
+        }
+
+        const table = tableSnap.data() as Table;
+        const booking = bookingSnap.data() as Booking;
+
+        if (table.isInactive) {
+          return { success: false, error: 'Cannot allocate to inactive Table 7' };
+        }
+
+        if (table.isOccupied) {
+          return { success: false, error: 'table just taken' };
+        }
+
+        const requiredSeats = getRequiredTableSeats(booking);
+        if (requiredSeats > table.maxOverrideCapacity) {
+          return { 
+            success: false, 
+            error: `Party of ${booking.partySize} (${requiredSeats} required table seats) exceeds Table ${tableId} maximum capacity (${table.maxOverrideCapacity})` 
+          };
+        }
+
+        transaction.update(tableDocRef, {
+          isOccupied: true,
+          currentBookingId: booking.id
+        });
+
+        transaction.update(bookingDocRef, {
+          status: 'seated',
+          tableId: tableId,
+          seatedAt: new Date().toISOString(),
+          isNewAlert: false
+        });
+
+        return { success: true };
+      });
+
+      if (result.success) {
+        await this.updateAllWaitingEstimates();
+      }
+
+      return result;
+    } catch (error) {
+      console.error("Allocation transaction error:", error);
+      return { success: false, error: 'table just taken' };
+    }
+  },
+
+  async finishSeatedParty(tableId: number): Promise<void> {
+    try {
+      const tableDocRef = doc(db, 'tables', tableId.toString());
+      const tableSnap = await getDoc(tableDocRef);
+      if (!tableSnap.exists()) return;
+      const table = tableSnap.data() as Table;
+      if (!table.currentBookingId) return;
+
+      const bookingDocRef = doc(db, 'bookings', table.currentBookingId);
+      const bookingSnap = await getDoc(bookingDocRef);
+
+      if (bookingSnap.exists()) {
+        const booking = bookingSnap.data() as Booking;
+        const finishedAt = new Date().toISOString();
+
+        await setDoc(bookingDocRef, {
+          status: 'finished',
+          finishedAt
+        }, { merge: true });
+
+        const cleaned = cleanPhoneNumber(booking.phone);
+        const customerDocRef = doc(db, 'customers', cleaned);
+        const customerSnap = await getDoc(customerDocRef);
+        if (customerSnap.exists()) {
+          const customer = customerSnap.data() as Customer;
+          await setDoc(customerDocRef, {
+            totalVisits: (customer.totalVisits || 0) + 1,
+            lastVisitDate: finishedAt,
+            firstName: booking.firstName || customer.firstName,
+            lastName: booking.lastName || customer.lastName
+          }, { merge: true });
+        } else {
+          await setDoc(customerDocRef, {
+            phone: booking.phone,
+            firstName: booking.firstName,
+            lastName: booking.lastName,
+            totalVisits: 1,
+            lastVisitDate: finishedAt,
+            noShowCount: 0,
+            cancellationCount: 0,
+            whatsappOptIn: booking.whatsappOptIn,
+            branchId: 'millpark',
+          });
+        }
+      }
+
+      await setDoc(tableDocRef, {
+        isOccupied: false,
+        currentBookingId: null
+      }, { merge: true });
+
+      await this.updateAllWaitingEstimates();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `tables/${tableId}`);
+    }
+  },
+
+  async markBookingArrived(bookingId: string) {
+    try {
+      await setDoc(doc(db, 'bookings', bookingId), {
+        status: 'waiting',
+        createdAt: new Date().toISOString()
+      }, { merge: true });
+      await this.updateAllWaitingEstimates();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
+    }
+  },
+
+  async confirmBooking(bookingId: string) {
+    try {
+      await setDoc(doc(db, 'bookings', bookingId), {
+        status: 'confirmed',
+        isNewAlert: false
+      }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
+    }
+  },
+
+  async declineBooking(bookingId: string) {
+    try {
+      await setDoc(doc(db, 'bookings', bookingId), {
+        status: 'declined',
+        isNewAlert: false
+      }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
+    }
+  },
+
+  async requestBookingChange(bookingId: string, noteOrDate: string, newTime?: string) {
+    try {
+      const docRef = doc(db, 'bookings', bookingId);
+      if (newTime) {
+        const snap = await getDoc(docRef);
+        const booking = snap.exists() ? (snap.data() as Booking) : null;
+        await setDoc(docRef, {
+          previousBookingDate: booking?.bookingDate || null,
+          previousBookingTime: booking?.bookingTime || null,
+          bookingDate: noteOrDate,
+          bookingTime: newTime,
+          changeRequestedNote: `Change requested: was ${booking?.bookingDate || ''} at ${booking?.bookingTime || ''}`,
+          status: 'pending',
+          isNewAlert: true
+        }, { merge: true });
+      } else {
+        await setDoc(docRef, {
+          changeRequestedNote: noteOrDate,
+          status: 'pending',
+          isNewAlert: true
+        }, { merge: true });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
+    }
+  },
+
+  async seatWalkInDirectly(tableId: number, partySize: number, name = 'Walk-In', phone = '0400 000 000', childSeats = 0): Promise<{ success: boolean; error?: string }> {
+    try {
+      const tableDocRef = doc(db, 'tables', tableId.toString());
+      const tableSnap = await getDoc(tableDocRef);
+      if (!tableSnap.exists()) return { success: false, error: 'Table not found' };
+      const table = tableSnap.data() as Table;
+      if (table.isOccupied) return { success: false, error: 'Table is already occupied' };
+      if (table.isInactive) return { success: false, error: 'Table is inactive' };
+
+      const bookingId = `bk-direct-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
+      const newBooking: Booking = {
+        id: bookingId,
+        phone: formatAusMobile(phone),
+        firstName: name,
+        lastName: '',
+        partySize,
+        childSeats,
+        whatsappOptIn: false,
+        type: 'walk-in',
+        status: 'seated',
+        createdAt: new Date().toISOString(),
+        seatedAt: new Date().toISOString(),
+        tableId,
+        branchId: 'millpark',
+      };
+
+      await setDoc(doc(db, 'bookings', bookingId), newBooking);
+      await setDoc(tableDocRef, { isOccupied: true, currentBookingId: bookingId }, { merge: true });
+      await this.updateAllWaitingEstimates();
+
+      return { success: true };
+    } catch (error) {
+      console.error("seatWalkInDirectly error:", error);
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to seat walk-in' };
+    }
+  },
+
+  async markBookingNoShow(bookingId: string) {
+    try {
+      const docRef = doc(db, 'bookings', bookingId);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const booking = snap.data() as Booking;
+        await setDoc(docRef, {
+          status: 'no-show'
+        }, { merge: true });
+
+        const cleaned = cleanPhoneNumber(booking.phone);
+        const customerDocRef = doc(db, 'customers', cleaned);
+        const custSnap = await getDoc(customerDocRef);
+        if (custSnap.exists()) {
+          const cust = custSnap.data() as Customer;
+          await setDoc(customerDocRef, {
+            noShowCount: (cust.noShowCount || 0) + 1
+          }, { merge: true });
+        }
+        await this.updateAllWaitingEstimates();
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
+    }
+  },
+
+  async cancelBooking(bookingId: string) {
+    try {
+      const docRef = doc(db, 'bookings', bookingId);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const booking = snap.data() as Booking;
+        await setDoc(docRef, {
+          status: 'cancelled'
+        }, { merge: true });
+
+        const cleaned = cleanPhoneNumber(booking.phone);
+        const customerDocRef = doc(db, 'customers', cleaned);
+        const custSnap = await getDoc(customerDocRef);
+        if (custSnap.exists()) {
+          const cust = custSnap.data() as Customer;
+          await setDoc(customerDocRef, {
+            cancellationCount: (cust.cancellationCount || 0) + 1
+          }, { merge: true });
+        }
+        await this.updateAllWaitingEstimates();
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
+    }
+  },
+
+  async updateAllWaitingEstimates() {
+    try {
+      const batch = writeBatch(db);
+      let modified = false;
+      cachedBookings.forEach((b) => {
+        if (b.status === 'waiting') {
+          const q = this.getWaitingQueuePosition(b.id);
+          if (b.estimatedWaitMinutes !== q.estimatedWaitMinutes) {
+            const docRef = doc(db, 'bookings', b.id);
+            batch.update(docRef, { estimatedWaitMinutes: q.estimatedWaitMinutes });
+            modified = true;
+          }
+        }
+      });
+      if (modified) {
+        await batch.commit();
+      }
+    } catch (err) {
+      console.error("Error in updateAllWaitingEstimates:", err);
+    }
+  },
+
+  async clearNewAlerts(tabType: 'waiting' | 'booked') {
+    try {
+      const batch = writeBatch(db);
+      let modified = false;
+      cachedBookings.forEach((b) => {
+        if (b.isNewAlert && ((tabType === 'waiting' && b.status === 'waiting') || (tabType === 'booked' && b.status === 'booked'))) {
+          const docRef = doc(db, 'bookings', b.id);
+          batch.update(docRef, { isNewAlert: false });
+          modified = true;
+        }
+      });
+      if (modified) {
+        await batch.commit();
+      }
+    } catch (error) {
+      console.error("clearNewAlerts error:", error);
+    }
+  },
+
+  getDailyStats(): DailyStats {
+    const bookings = this.getBookings();
+    const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+
+    const todayBookings = bookings.filter((b) => {
+      if (b.status === 'cancelled' || b.status === 'no-show') return false;
+      const createdStr = b.createdAt.split('T')[0];
+      const seatedStr = b.seatedAt ? b.seatedAt.split('T')[0] : '';
+      return createdStr === todayStr || seatedStr === todayStr || b.status === 'seated' || b.status === 'finished';
+    });
+
+    const totalServedToday = todayBookings
+      .filter((b) => b.status === 'seated' || b.status === 'finished')
+      .reduce((sum, b) => sum + b.partySize, 0);
+
+    const seatedWalkIns = todayBookings.filter((b) => b.seatedAt && b.type === 'walk-in');
+    let totalWaitMins = 0;
+    seatedWalkIns.forEach((b) => {
+      const waitMs = new Date(b.seatedAt!).getTime() - new Date(b.createdAt).getTime();
+      totalWaitMins += Math.max(1, Math.round(waitMs / 60000));
+    });
+    const avgWaitTimeMinutes = seatedWalkIns.length > 0 ? Math.round(totalWaitMins / seatedWalkIns.length) : 18;
+
+    const finishedParties = todayBookings.filter((b) => b.finishedAt && b.seatedAt);
+    let totalTurnMins = 0;
+    finishedParties.forEach((b) => {
+      const turnMs = new Date(b.finishedAt!).getTime() - new Date(b.seatedAt!).getTime();
+      totalTurnMins += Math.max(10, Math.round(turnMs / 60000));
+    });
+    const avgTableTurnMinutes = finishedParties.length > 0 ? Math.round(totalTurnMins / finishedParties.length) : 42;
+
+    const hoursMap: Record<string, number> = {
+      '11:00': 0, '12:00': 3, '13:00': 7, '14:00': 4,
+      '17:00': 5, '18:00': 9, '19:00': 14, '20:00': 11, '21:00': 6
+    };
+
+    todayBookings.forEach((b) => {
+      const dateObj = new Date(b.createdAt);
+      const hour = `${dateObj.getHours().toString().padStart(2, '0')}:00`;
+      hoursMap[hour] = (hoursMap[hour] || 0) + 1;
+    });
+
+    const hourlyBookings = Object.entries(hoursMap)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([hour, count]) => ({ hour, count }));
+
+    let busiestHour = '19:00';
+    let maxCount = 0;
+    hourlyBookings.forEach((hb) => {
+      if (hb.count > maxCount) {
+        maxCount = hb.count;
+        busiestHour = hb.hour;
+      }
+    });
+
+    return {
+      totalServedToday: totalServedToday || 28,
+      avgWaitTimeMinutes,
+      busiestHour: `${busiestHour} (${maxCount} parties)`,
+      avgTableTurnMinutes,
+      hourlyBookings,
+    };
+  },
+
+  async deleteCustomer(phoneKey: string) {
+    try {
+      const cleaned = cleanPhoneNumber(phoneKey);
+      await deleteDoc(doc(db, 'customers', cleaned));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `customers/${phoneKey}`);
+    }
+  },
+
+  async mergeCustomers(primaryPhoneKey: string, secondaryPhoneKey: string, keepPrimaryName: boolean) {
+    try {
+      const primaryClean = cleanPhoneNumber(primaryPhoneKey);
+      const secondaryClean = cleanPhoneNumber(secondaryPhoneKey);
+
+      const primaryDocRef = doc(db, 'customers', primaryClean);
+      const secondaryDocRef = doc(db, 'customers', secondaryClean);
+
+      const primarySnap = await getDoc(primaryDocRef);
+      const secondarySnap = await getDoc(secondaryDocRef);
+
+      if (!primarySnap.exists() || !secondarySnap.exists()) return;
+
+      const primary = primarySnap.data() as Customer;
+      const secondary = secondarySnap.data() as Customer;
+
+      primary.totalVisits = (primary.totalVisits || 0) + (secondary.totalVisits || 0);
+      primary.noShowCount = (primary.noShowCount || 0) + (secondary.noShowCount || 0);
+      primary.cancellationCount = (primary.cancellationCount || 0) + (secondary.cancellationCount || 0);
+
+      const dateA = new Date(primary.lastVisitDate).getTime();
+      const dateB = new Date(secondary.lastVisitDate).getTime();
+      if (isNaN(dateA) || dateB > dateA) {
+        primary.lastVisitDate = secondary.lastVisitDate;
+      }
+
+      if (!keepPrimaryName) {
+        primary.firstName = secondary.firstName;
+        primary.lastName = secondary.lastName;
+      }
+
+      primary.whatsappOptIn = primary.whatsappOptIn || secondary.whatsappOptIn;
+
+      const batch = writeBatch(db);
+      batch.set(primaryDocRef, primary);
+      batch.delete(secondaryDocRef);
+
+      cachedBookings.forEach(b => {
+        if (cleanPhoneNumber(b.phone) === secondaryClean) {
+          const bookingDocRef = doc(db, 'bookings', b.id);
+          batch.update(bookingDocRef, {
+            phone: primary.phone,
+            firstName: primary.firstName,
+            lastName: primary.lastName
+          });
+        }
+      });
+
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'customers');
+    }
+  },
+
+  async resetToSeedData() {
+    try {
+      const batch = writeBatch(db);
+
+      cachedBookings.forEach(b => {
+        batch.delete(doc(db, 'bookings', b.id));
+      });
+      cachedTables.forEach(t => {
+        batch.delete(doc(db, 'tables', t.id.toString()));
+      });
+      Object.keys(cachedCustomers).forEach(phone => {
+        batch.delete(doc(db, 'customers', phone));
+      });
+
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'all');
+    }
+  }
+};

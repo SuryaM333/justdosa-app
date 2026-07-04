@@ -1,0 +1,6 @@
+{
+  "name": "Just Dosa Table Booking & Waitlist",
+  "description": "Restaurant table booking, live waitlist, floor plan management, and customer CRM for Just Dosa Melbourne.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

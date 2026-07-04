@@ -1,0 +1,638 @@
+import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Users, CheckCircle2, AlertTriangle, Ban, Clock, X, Check, Plus, UserCheck, DoorOpen, Bath, UtensilsCrossed, Store, Baby } from 'lucide-react';
+import { Table, Booking } from '../../types';
+import { dataService } from '../../services/dataService';
+import { getRequiredTableSeats, formatPartyBreakdownShort } from '../../utils/bookingUtils';
+
+interface FloorPlanProps {
+  tables: Table[];
+  bookings: Booking[];
+  selectedWaitingBooking: Booking | null;
+  onSelectWaitingBooking: (booking: Booking | null) => void;
+  onTableUpdated: () => void;
+}
+
+export const FloorPlan: React.FC<FloorPlanProps> = ({
+  tables,
+  bookings,
+  selectedWaitingBooking,
+  onSelectWaitingBooking,
+  onTableUpdated,
+}) => {
+  const [overrideConfirmModal, setOverrideConfirmModal] = useState<{ table: Table; booking: Booking } | null>(null);
+  const [errorToast, setErrorToast] = useState<string | null>(null);
+  const [selectedOccupiedTable, setSelectedOccupiedTable] = useState<Table | null>(null);
+  const [quickSeatModal, setQuickSeatModal] = useState<Table | null>(null);
+  const [quickSeatPartySize, setQuickSeatPartySize] = useState(2);
+  const [quickSeatName, setQuickSeatName] = useState('');
+  const [quickSeatPhone, setQuickSeatPhone] = useState('');
+
+  const getTableBooking = (table: Table): Booking | undefined => {
+    if (!table.currentBookingId) return undefined;
+    return bookings.find((b) => b.id === table.currentBookingId);
+  };
+
+  const getSeatedDuration = (seatedAt?: string): string => {
+    if (!seatedAt) return '0m';
+    const diffMins = Math.max(1, Math.round((Date.now() - new Date(seatedAt).getTime()) / 60000));
+    return `${diffMins}m`;
+  };
+
+  const getBestFitTable = (): Table | null => {
+    if (!selectedWaitingBooking) return null;
+    const requiredSeats = getRequiredTableSeats(selectedWaitingBooking);
+
+    const candidates = tables.filter((t) => !t.isOccupied && !t.isInactive && requiredSeats <= t.maxOverrideCapacity);
+    if (candidates.length === 0) return null;
+
+    // For parties of 1-2 (required seats <= 2)
+    if (requiredSeats <= 2) {
+      // Prefer the 2-seaters (T5, T6, T7) but always try to leave at least ONE of them vacant
+      const activeTwoSeaters = tables.filter(t => [5, 6, 7].includes(t.id));
+      const occupiedCount = activeTwoSeaters.filter(t => t.isOccupied || t.isInactive).length;
+
+      // "if two of the three are already occupied, suggest a 6-seater for the next couple instead."
+      if (occupiedCount >= 2) {
+        const vacantSixSeaters = candidates.filter(t => t.capacity === 6);
+        if (vacantSixSeaters.length > 0) {
+          vacantSixSeaters.sort((a, b) => a.id - b.id);
+          return vacantSixSeaters[0];
+        }
+      }
+
+      // Otherwise, suggest the preferred vacant 2-seaters
+      const vacantTwoSeaters = candidates.filter(t => [5, 6, 7].includes(t.id));
+      if (vacantTwoSeaters.length > 0) {
+        vacantTwoSeaters.sort((a, b) => a.id - b.id);
+        return vacantTwoSeaters[0];
+      }
+    }
+
+    // Default: Sort by smallest capacity first, then by table id
+    candidates.sort((a, b) => {
+      if (a.capacity !== b.capacity) return a.capacity - b.capacity;
+      return a.id - b.id;
+    });
+
+    return candidates[0];
+  };
+
+  const bestFitTable = getBestFitTable();
+
+  const handleTableClick = async (table: Table) => {
+    setErrorToast(null);
+
+    // If table is occupied
+    if (table.isOccupied) {
+      setSelectedOccupiedTable(table);
+      return;
+    }
+
+    // If vacant and a waiting customer is selected for allocation
+    if (selectedWaitingBooking) {
+      const requiredSeats = getRequiredTableSeats(selectedWaitingBooking);
+      // Check capacity
+      if (requiredSeats > table.capacity) {
+        // Can we override on tables 5, 6, and 7?
+        if ((table.id === 5 || table.id === 6 || table.id === 7) && requiredSeats <= table.maxOverrideCapacity) {
+          // Open override confirm dialog
+          setOverrideConfirmModal({ table, booking: selectedWaitingBooking });
+          return;
+        } else {
+          setErrorToast(`Party of ${selectedWaitingBooking.partySize} (${requiredSeats} required table seats) exceeds Table ${table.id} capacity (${table.capacity} max).`);
+          return;
+        }
+      }
+
+      // Perform allocation
+      const res = await dataService.allocateTable(selectedWaitingBooking.id, table.id);
+      if (res.success) {
+        onSelectWaitingBooking(null);
+        onTableUpdated();
+      } else {
+        setErrorToast(res.error || 'Allocation failed.');
+      }
+    } else {
+      setQuickSeatModal(table);
+      setQuickSeatPartySize(Math.min(2, table.capacity));
+      setQuickSeatName('');
+      setQuickSeatPhone('');
+    }
+  };
+
+  const handleQuickSeatSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickSeatModal) return;
+    const res = await dataService.seatWalkInDirectly(
+      quickSeatModal.id,
+      quickSeatPartySize,
+      quickSeatName.trim() || 'Walk-In',
+      quickSeatPhone.trim() || '0400 000 000'
+    );
+    if (res.success) {
+      setQuickSeatModal(null);
+      onTableUpdated();
+    } else {
+      setErrorToast(res.error || 'Failed to seat walk-in');
+    }
+  };
+
+  const confirmOverrideAllocation = async () => {
+    if (!overrideConfirmModal) return;
+    const { table, booking } = overrideConfirmModal;
+    const res = await dataService.allocateTable(booking.id, table.id);
+    if (res.success) {
+      setOverrideConfirmModal(null);
+      onSelectWaitingBooking(null);
+      onTableUpdated();
+    } else {
+      setErrorToast(res.error || 'Override allocation failed.');
+      setOverrideConfirmModal(null);
+    }
+  };
+
+  const handleFinishParty = (tableId: number) => {
+    dataService.finishSeatedParty(tableId);
+    setSelectedOccupiedTable(null);
+    onTableUpdated();
+  };
+
+  // Helper to render table box
+  const renderTableNode = (tableId: number) => {
+    const table = tables.find((t) => t.id === tableId);
+    if (!table) return null;
+
+    const booking = getTableBooking(table);
+    const isDiamond = table.position.isDiamond;
+    const requiredSeats = selectedWaitingBooking ? getRequiredTableSeats(selectedWaitingBooking) : 0;
+    const isSelectedTarget = selectedWaitingBooking && !table.isOccupied && !table.isInactive && (
+      requiredSeats <= table.capacity || 
+      ((table.id === 5 || table.id === 6 || table.id === 7) && requiredSeats <= table.maxOverrideCapacity)
+    );
+    const isBestFit = bestFitTable?.id === table.id;
+
+    // Color coding: green = vacant, red = occupied, grey = inactive
+    let bgStyle = 'bg-emerald-500/10 border-emerald-500 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/20';
+    let badgeBg = 'bg-emerald-500 text-white';
+    if (table.isInactive) {
+      bgStyle = 'bg-[#E8E2D2] dark:bg-[#1C1917]/80 border-[#6B5E4C] dark:border-[#3D352E] text-[#6B5E4C] dark:text-[#B8ACA0] cursor-not-allowed opacity-60';
+      badgeBg = 'bg-[#6B5E4C] dark:bg-[#3D352E] text-white';
+    } else if (table.isOccupied) {
+      bgStyle = 'bg-rose-500/15 border-rose-500 text-rose-800 dark:text-rose-300 hover:bg-rose-500/25 shadow-sm shadow-rose-500/10';
+      badgeBg = 'bg-rose-500 text-white';
+    } else if (isBestFit) {
+      bgStyle = 'bg-[#E37A08]/30 border-[#E37A08] text-[#8B4513] dark:text-[#D2B48C] hover:bg-[#E37A08]/40 ring-4 ring-[#E37A08] animate-pulse border-2 shadow-lg shadow-[#E37A08]/30';
+      badgeBg = 'bg-[#E37A08] text-white';
+    } else if (isSelectedTarget) {
+      bgStyle = 'bg-[#E37A08]/15 border-[#E37A08]/70 text-[#8B4513] dark:text-[#D2B48C] hover:bg-[#E37A08]/25 ring-2 ring-[#E37A08]/30 animate-pulse';
+      badgeBg = 'bg-[#E37A08] text-white';
+    }
+
+    // For diamond layout, we apply rotate transformation on outer box and inverse on inner content
+    return (
+      <motion.div
+        key={table.id}
+        whileHover={!table.isInactive ? { scale: 1.03 } : {}}
+        whileTap={!table.isInactive ? { scale: 0.97 } : {}}
+        onClick={() => handleTableClick(table)}
+        className={`relative cursor-pointer transition-all flex items-center justify-center select-none ${
+          isDiamond 
+            ? 'w-24 h-24 sm:w-28 sm:h-28 my-4 mx-auto rotate-45 rounded-2xl border-2 shadow-md' 
+            : table.id === 4 
+            ? 'w-48 sm:w-64 h-24 rounded-2xl border-2 shadow-md mx-auto' 
+            : 'w-28 sm:w-36 h-40 rounded-2xl border-2 shadow-md mx-auto'
+        } ${bgStyle}`}
+      >
+        {isBestFit && (
+          <div className={`absolute -top-3 left-1/2 -translate-x-1/2 bg-[#E37A08] text-white text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider shadow-md whitespace-nowrap z-20 flex items-center gap-1 ${isDiamond ? '-rotate-45' : ''}`}>
+            <span>★ Best Fit</span>
+          </div>
+        )}
+        <div className={`flex flex-col items-center justify-center text-center p-2 ${isDiamond ? '-rotate-45' : ''}`}>
+          {/* Table Number Badge */}
+          <div className={`text-xs font-bold px-2 py-0.5 rounded-full mb-1 shadow-sm ${badgeBg}`}>
+            {table.name}
+          </div>
+
+          {/* Status / Content */}
+          {table.isInactive ? (
+            <div className="flex flex-col items-center">
+              <Ban className="w-4 h-4 mb-0.5 text-[#6B5E4C]" />
+              <span className="text-[10px] uppercase font-bold tracking-wider">INACTIVE</span>
+            </div>
+          ) : table.isOccupied ? (
+            <div className="flex flex-col items-center">
+              <span className="font-bold text-xs sm:text-sm truncate max-w-[80px] text-[#2D2926] dark:text-white">
+                {booking ? `${booking.firstName}` : 'Occupied'}
+              </span>
+              <div className="flex flex-col items-center gap-0.5 mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-400">
+                <div className="flex items-center gap-1">
+                  <Users className="w-3 h-3" />
+                  <span>{booking ? formatPartyBreakdownShort(booking) : ''}</span>
+                </div>
+                {booking && ((booking.childrenHighChairs?.filter(Boolean).length ?? booking.childSeats) > 0) && (
+                  <div className="flex items-center gap-0.5 bg-rose-500/20 text-rose-700 dark:text-rose-300 px-1.5 py-0.5 rounded text-[9px] font-bold border border-rose-500/30" title="High Chair Needed">
+                    <Baby className="w-3 h-3" />
+                    <span>High Chair</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-1 text-[9px] text-[#6B5E4C] dark:text-[#B8ACA0]">
+                  <Clock className="w-3 h-3" />
+                  <span>{booking ? getSeatedDuration(booking.seatedAt) : '30m'}</span>
+                </div>
+              </div>
+              <span className="text-[9px] uppercase font-bold text-rose-500 mt-1 bg-white/60 dark:bg-[#1C1917]/80 px-1.5 py-0.5 rounded border border-rose-300 dark:border-rose-800">
+                Tap to Free
+              </span>
+            </div>
+          ) : (
+            <div className="flex flex-col items-center">
+              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase">
+                {isSelectedTarget ? (isBestFit ? 'Best Fit!' : 'Tap to Seat!') : 'Vacant'}
+              </span>
+              <div className="flex items-center gap-1 text-[10px] text-[#6B5E4C] dark:text-[#B8ACA0] mt-0.5 font-medium">
+                <Users className="w-3 h-3" />
+                <span>Cap: {table.capacity} {table.maxOverrideCapacity > table.capacity ? `(+1)` : ''}</span>
+              </div>
+            </div>
+          )}
+        </div>
+      </motion.div>
+    );
+  };
+
+  return (
+    <div className="bg-white dark:bg-[#26221E] rounded-3xl p-4 sm:p-6 shadow-xl border border-[#E8E2D2] dark:border-[#3D352E] relative">
+      {/* Floor Plan Header & Legend */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 mb-6 border-b border-[#E8E2D2] dark:border-[#3D352E]">
+        <div>
+          <h2 className="text-lg font-serif font-bold text-[#2D2926] dark:text-white flex items-center gap-2">
+            <span>Restaurant Floor Plan</span>
+            <span className="text-xs font-normal px-2.5 py-0.5 rounded-full bg-[#F5F2EA] dark:bg-[#1C1917] text-[#6B5E4C] dark:text-[#B8ACA0] border border-[#E8E2D2] dark:border-[#3D352E]">
+              10 Active
+            </span>
+          </h2>
+          <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0] mt-0.5">
+            {selectedWaitingBooking ? (
+              <span className="text-[#E37A08] dark:text-[#D2B48C] font-semibold flex items-center gap-1 animate-pulse">
+                <UserCheck className="w-4 h-4" />
+                Selecting table for <strong>{selectedWaitingBooking.firstName}</strong> (Party of {selectedWaitingBooking.partySize}). Tap a blinking vacant table!
+              </span>
+            ) : (
+              'Tap a vacant table to allocate after selecting a waiting customer, or tap an occupied table to finish.'
+            )}
+          </p>
+        </div>
+
+        {/* Legend */}
+        <div className="flex items-center gap-3 text-xs font-medium">
+          <div className="flex items-center gap-1.5">
+            <div className="w-3 h-3 rounded-md bg-emerald-500" />
+            <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Vacant</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-3 h-3 rounded-md bg-rose-500" />
+            <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Occupied</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Error Toast if allocation fails */}
+      <AnimatePresence>
+        {errorToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="mb-6 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-300 text-xs flex items-center justify-between shadow-sm"
+          >
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>{errorToast}</span>
+            </div>
+            <button onClick={() => setErrorToast(null)} className="p-1 hover:bg-amber-200/50 rounded-lg">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Smart Table Suggestion Banner */}
+      <AnimatePresence>
+        {selectedWaitingBooking && bestFitTable && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.98, y: -5 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.98, y: -5 }}
+            className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-[#E37A08]/15 via-[#8B4513]/15 to-[#E37A08]/15 dark:from-[#D2B48C]/15 dark:via-[#3D352E] dark:to-[#D2B48C]/15 border-2 border-[#E37A08] dark:border-[#D2B48C] shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#E37A08] text-white flex items-center justify-center font-black text-lg shadow-md shrink-0">
+                T{bestFitTable.id}
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-[#E37A08] dark:text-[#D2B48C] flex items-center gap-1">
+                    <span>★ Smart Table Suggestion</span>
+                  </span>
+                  <span className="text-[10px] bg-[#E37A08]/20 text-[#8B4513] dark:text-[#D2B48C] px-2 py-0.5 rounded-md font-bold">
+                    Best Fit ({bestFitTable.capacity} Seats)
+                  </span>
+                </div>
+                <p className="text-xs sm:text-sm text-[#2D2926] dark:text-white font-medium mt-0.5">
+                  Table {bestFitTable.id} is the smallest vacant table that fits <strong>{selectedWaitingBooking.firstName}</strong> ({formatPartyBreakdownShort(selectedWaitingBooking)}).
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => handleTableClick(bestFitTable)}
+                className="w-full sm:w-auto px-4 py-2 rounded-xl bg-[#E37A08] hover:bg-[#c96906] text-white text-xs font-bold shadow-md shadow-[#E37A08]/20 flex items-center justify-center gap-1.5 transition-all transform active:scale-95"
+              >
+                <Check className="w-4 h-4" />
+                <span>Allocate to Table {bestFitTable.id}?</span>
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Visual Grid with Landmarks:
+          Top Row: Door / Entry on Top-Left, Table 4 Top-Center
+          3 Columns: Left (Tables 10, 9, 8, Washroom), Middle (Diamonds 5, 6, 7, Kitchen), Right (Tables 3, 2, 1, Counter)
+      */}
+      <div className="py-4 bg-[#FFFDF7]/60 dark:bg-[#1C1917]/40 rounded-2xl border border-[#E8E2D2]/60 dark:border-[#3D352E]/60 p-4 sm:p-8">
+        {/* Top Row: Door / Entry on Top-Left, Table 4 Top-Center, Spacer Top-Right */}
+        <div className="grid grid-cols-3 gap-4 sm:gap-8 items-center justify-items-center mb-6">
+          <div className="flex justify-center w-full">
+            <div className="w-28 sm:w-36 h-20 sm:h-24 rounded-2xl bg-[#E8E2D2]/40 dark:bg-[#1C1917]/50 border-2 border-dashed border-[#A1917B]/60 dark:border-[#6B5E4C]/60 flex flex-col items-center justify-center p-2 text-center text-[#6B5E4C] dark:text-[#B8ACA0] shadow-inner select-none">
+              <DoorOpen className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C] mb-1" />
+              <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Door / Entry</span>
+              <span className="text-[9px] font-medium opacity-75">Main Entrance</span>
+            </div>
+          </div>
+          <div className="flex justify-center w-full">
+            {renderTableNode(4)}
+          </div>
+          <div className="w-full" />
+        </div>
+
+        {/* 3 Columns Layout with Bottom Landmarks */}
+        <div className="grid grid-cols-3 gap-4 sm:gap-8 items-center justify-items-center">
+          {/* Left Column: Tables 10, 9, 8, then Washroom */}
+          <div className="flex flex-col gap-4 sm:gap-6 w-full items-center">
+            {renderTableNode(10)}
+            {renderTableNode(9)}
+            {renderTableNode(8)}
+            <div className="w-28 sm:w-36 h-20 sm:h-24 mt-2 rounded-2xl bg-[#E8E2D2]/40 dark:bg-[#1C1917]/50 border-2 border-dashed border-[#A1917B]/60 dark:border-[#6B5E4C]/60 flex flex-col items-center justify-center p-2 text-center text-[#6B5E4C] dark:text-[#B8ACA0] shadow-inner select-none">
+              <Bath className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C] mb-1" />
+              <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Washroom</span>
+              <span className="text-[9px] font-medium opacity-75">Restrooms</span>
+            </div>
+          </div>
+
+          {/* Middle Column: Diamonds 5, 6, 7, then Kitchen */}
+          <div className="flex flex-col gap-6 sm:gap-8 w-full items-center justify-center my-auto">
+            {renderTableNode(5)}
+            {renderTableNode(6)}
+            {renderTableNode(7)}
+            <div className="w-28 sm:w-36 h-20 sm:h-24 mt-2 rounded-2xl bg-[#E8E2D2]/40 dark:bg-[#1C1917]/50 border-2 border-dashed border-[#A1917B]/60 dark:border-[#6B5E4C]/60 flex flex-col items-center justify-center p-2 text-center text-[#6B5E4C] dark:text-[#B8ACA0] shadow-inner select-none">
+              <UtensilsCrossed className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C] mb-1" />
+              <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Kitchen</span>
+              <span className="text-[9px] font-medium opacity-75">Staff Only</span>
+            </div>
+          </div>
+
+          {/* Right Column: Tables 3, 2, 1, then Counter */}
+          <div className="flex flex-col gap-4 sm:gap-6 w-full items-center">
+            {renderTableNode(3)}
+            {renderTableNode(2)}
+            {renderTableNode(1)}
+            <div className="w-28 sm:w-36 h-20 sm:h-24 mt-2 rounded-2xl bg-[#E8E2D2]/40 dark:bg-[#1C1917]/50 border-2 border-dashed border-[#A1917B]/60 dark:border-[#6B5E4C]/60 flex flex-col items-center justify-center p-2 text-center text-[#6B5E4C] dark:text-[#B8ACA0] shadow-inner select-none">
+              <Store className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C] mb-1" />
+              <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Counter</span>
+              <span className="text-[9px] font-medium opacity-75">Pay / Service</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Override Confirmation Modal for Tables 5 & 6 (+1 chair) */}
+      <AnimatePresence>
+        {overrideConfirmModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-sm bg-white dark:bg-[#26221E] rounded-3xl p-6 shadow-2xl border border-[#E8E2D2] dark:border-[#3D352E] text-center"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-[#F5F2EA] dark:bg-[#1C1917] flex items-center justify-center mx-auto mb-4 text-[#E37A08]">
+                <Plus className="w-7 h-7" />
+              </div>
+              <h3 className="font-serif font-bold text-lg text-[#2D2926] dark:text-white mb-2">
+                Add Extra Chair Override?
+              </h3>
+              <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0] mb-6">
+                <strong>{overrideConfirmModal.table.name}</strong> has a standard capacity of 2 people. 
+                You are allocating a party of <strong>{overrideConfirmModal.booking.partySize}</strong> people ({overrideConfirmModal.booking.firstName} {overrideConfirmModal.booking.lastName}).
+                <br /><br />
+                Do you want to add 1 extra chair to seat them at this table?
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setOverrideConfirmModal(null)}
+                  className="flex-1 py-2.5 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] text-[#2D2926] dark:text-[#B8ACA0] font-semibold text-xs border border-[#E8E2D2] dark:border-[#3D352E]"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmOverrideAllocation}
+                  className="flex-1 py-2.5 rounded-xl bg-[#E37A08] hover:bg-[#c96906] text-white font-semibold text-xs shadow-md shadow-[#E37A08]/20"
+                >
+                  Confirm (+1 Chair)
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Occupied Table Action Modal (Mark Finished) */}
+      <AnimatePresence>
+        {selectedOccupiedTable && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-sm bg-white dark:bg-[#26221E] rounded-3xl p-6 shadow-2xl border border-[#E8E2D2] dark:border-[#3D352E]"
+            >
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300">
+                    {selectedOccupiedTable.name}
+                  </span>
+                  <h3 className="font-serif font-bold text-lg text-[#2D2926] dark:text-white mt-1">
+                    Table Seating Details
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setSelectedOccupiedTable(null)}
+                  className="p-1 rounded-full hover:bg-[#F5F2EA] dark:hover:bg-[#3D352E]"
+                >
+                  <X className="w-5 h-5 text-[#6B5E4C]" />
+                </button>
+              </div>
+
+              {(() => {
+                const bk = getTableBooking(selectedOccupiedTable);
+                return bk ? (
+                  <div className="space-y-3 bg-[#F5F2EA] dark:bg-[#1C1917]/50 p-4 rounded-2xl mb-6 text-sm border border-[#E8E2D2]/60 dark:border-[#3D352E]/60">
+                    <div className="flex justify-between">
+                      <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Guest Name</span>
+                      <span className="font-semibold text-[#2D2926] dark:text-white">{bk.firstName} {bk.lastName}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Party Size</span>
+                      <span className="font-semibold text-[#2D2926] dark:text-white">{bk.partySize} Guests ({bk.childSeats} child)</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Phone</span>
+                      <span className="font-mono text-[#2D2926] dark:text-white">{bk.phone}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Seated Duration</span>
+                      <span className="font-bold text-rose-600 dark:text-rose-400">{getSeatedDuration(bk.seatedAt)}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-[#6B5E4C] mb-6">Occupied table.</p>
+                );
+              })()}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setSelectedOccupiedTable(null)}
+                  className="flex-1 py-3 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] text-[#2D2926] dark:text-[#B8ACA0] font-semibold text-xs border border-[#E8E2D2] dark:border-[#3D352E]"
+                >
+                  Close
+                </button>
+                <button
+                  onClick={() => handleFinishParty(selectedOccupiedTable.id)}
+                  className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-md shadow-emerald-500/20 flex items-center justify-center gap-1.5"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Mark Finished & Free</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Quick Seat Walk-In Modal */}
+      <AnimatePresence>
+        {quickSeatModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-sm bg-white dark:bg-[#26221E] rounded-3xl p-6 shadow-2xl border border-[#E8E2D2] dark:border-[#3D352E]"
+            >
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <span className="text-xs font-bold px-2 py-0.5 rounded bg-[#E37A08]/10 text-[#E37A08] uppercase">
+                    Quick Seat Walk-In
+                  </span>
+                  <h3 className="font-serif font-bold text-lg text-[#2D2926] dark:text-white mt-1">
+                    Seat party at {quickSeatModal.name}
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setQuickSeatModal(null)}
+                  className="p-1 rounded-full hover:bg-[#F5F2EA] dark:hover:bg-[#3D352E]"
+                >
+                  <X className="w-5 h-5 text-[#6B5E4C]" />
+                </button>
+              </div>
+
+              <form onSubmit={handleQuickSeatSubmit} className="space-y-4 text-left">
+                <div>
+                  <label className="block text-xs font-bold text-[#8B4513] dark:text-[#D2B48C] mb-1">
+                    Party Size (Required)
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setQuickSeatPartySize((prev) => Math.max(1, prev - 1))}
+                      className="w-10 h-10 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] font-bold text-lg border border-[#E8E2D2] flex items-center justify-center"
+                    >
+                      -
+                    </button>
+                    <span className="text-xl font-black font-mono text-center flex-1">
+                      {quickSeatPartySize} {quickSeatPartySize === 1 ? 'Person' : 'People'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setQuickSeatPartySize((prev) => Math.min(10, prev + 1))}
+                      className="w-10 h-10 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] font-bold text-lg border border-[#E8E2D2] flex items-center justify-center"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] mb-1">
+                    Guest Name (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Walk-In / John"
+                    value={quickSeatName}
+                    onChange={(e) => setQuickSeatName(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-xs text-[#2D2926] dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] mb-1">
+                    Phone (Optional)
+                  </label>
+                  <input
+                    type="tel"
+                    placeholder="0400 000 000"
+                    value={quickSeatPhone}
+                    onChange={(e) => setQuickSeatPhone(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-xs text-[#2D2926] dark:text-white font-mono"
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setQuickSeatModal(null)}
+                    className="flex-1 py-3 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] text-[#2D2926] dark:text-[#B8ACA0] font-semibold text-xs border border-[#E8E2D2] dark:border-[#3D352E]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-3 rounded-xl bg-[#E37A08] hover:bg-[#c96906] text-white font-bold text-xs shadow-md shadow-[#E37A08]/20 flex items-center justify-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Seat Party Here</span>
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
