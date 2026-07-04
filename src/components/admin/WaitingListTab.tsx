@@ -13,6 +13,7 @@ interface WaitingListTabProps {
   selectedWaitingBooking: Booking | null;
   onSelectWaitingBooking: (booking: Booking | null) => void;
   onRefresh: () => void;
+  onOpenNewBooking: () => void;
 }
 
 export const WaitingListTab: React.FC<WaitingListTabProps> = ({
@@ -22,6 +23,7 @@ export const WaitingListTab: React.FC<WaitingListTabProps> = ({
   selectedWaitingBooking,
   onSelectWaitingBooking,
   onRefresh,
+  onOpenNewBooking,
 }) => {
   const [quickSeatBooking, setQuickSeatBooking] = useState<Booking | null>(null);
 
@@ -129,7 +131,7 @@ export const WaitingListTab: React.FC<WaitingListTabProps> = ({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-[#F5F2EA]/60 dark:bg-[#1C1917]/40 p-4 rounded-2xl border border-[#E8E2D2] dark:border-[#3D352E]">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-[#F5F2EA]/60 dark:bg-[#1C1917]/40 p-4 rounded-2xl border border-[#E8E2D2] dark:border-[#3D352E]">
         <div>
           <h3 className="font-serif font-bold text-base text-[#2D2926] dark:text-white flex items-center gap-2">
             <span>Live Walk-In Waiting Queue</span>
@@ -141,6 +143,13 @@ export const WaitingListTab: React.FC<WaitingListTabProps> = ({
             Click <strong>"Select to Seat"</strong> on any party below, then tap a vacant table on the Floor Plan above (or use Quick Seat).
           </p>
         </div>
+
+        <button
+          onClick={onOpenNewBooking}
+          className="px-3.5 py-2 bg-[#E37A08] text-white hover:bg-[#c96906] rounded-xl text-xs font-black shadow-md shadow-[#E37A08]/15 hover:shadow-[#E37A08]/25 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer shrink-0"
+        >
+          <span>+ New Booking</span>
+        </button>
       </div>
 
       {waitingList.length === 0 ? (

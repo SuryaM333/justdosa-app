@@ -9,9 +9,10 @@ interface BookedTabProps {
   bookings: Booking[];
   customers: Record<string, Customer>;
   onRefresh: () => void;
+  onOpenNewBooking: () => void;
 }
 
-export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRefresh }) => {
+export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRefresh, onOpenNewBooking }) => {
   const [dateFilter, setDateFilter] = React.useState<'upcoming' | 'today' | 'all'>('upcoming');
 
   const getTodayStr = () => {
@@ -282,20 +283,29 @@ export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRef
           </p>
         </div>
 
-        <div className="flex items-center gap-2 self-start md:self-auto">
-          <label htmlFor="booked-date-filter" className="text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] whitespace-nowrap">
-            Date Filter:
-          </label>
-          <select
-            id="booked-date-filter"
-            value={dateFilter}
-            onChange={(e) => setDateFilter(e.target.value as 'upcoming' | 'today' | 'all')}
-            className="px-3 py-1.5 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-xs font-bold text-[#2D2926] dark:text-white focus:outline-hidden focus:ring-1 focus:ring-[#E37A08] cursor-pointer shadow-xs"
+        <div className="flex flex-wrap items-center gap-3 self-start md:self-auto">
+          <div className="flex items-center gap-2">
+            <label htmlFor="booked-date-filter" className="text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] whitespace-nowrap">
+              Date Filter:
+            </label>
+            <select
+              id="booked-date-filter"
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value as 'upcoming' | 'today' | 'all')}
+              className="px-3 py-1.5 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-xs font-bold text-[#2D2926] dark:text-white focus:outline-hidden focus:ring-1 focus:ring-[#E37A08] cursor-pointer shadow-xs"
+            >
+              <option value="upcoming">Upcoming & Today (Default)</option>
+              <option value="today">Today Only</option>
+              <option value="all">All Dates</option>
+            </select>
+          </div>
+
+          <button
+            onClick={onOpenNewBooking}
+            className="px-4 py-2 bg-[#E37A08] text-white hover:bg-[#c96906] rounded-xl text-xs font-black shadow-md shadow-[#E37A08]/15 hover:shadow-[#E37A08]/25 flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
           >
-            <option value="upcoming">Upcoming & Today (Default)</option>
-            <option value="today">Today Only</option>
-            <option value="all">All Dates</option>
-          </select>
+            <span>+ New Booking</span>
+          </button>
         </div>
       </div>
 
@@ -367,6 +377,12 @@ export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRef
                           {booking.firstName} {booking.lastName}
                         </span>
                         {getCustomerBadge(booking.phone)}
+                        {booking.source === 'phone/staff' && (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 shadow-xs" title="Manual Staff Booking">
+                            <Phone className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+                            <span>Staff Phone Booking</span>
+                          </span>
+                        )}
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
                           isPending ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30' :
                           isAltProposed ? 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30' :

@@ -150,9 +150,10 @@ export default function App() {
     sessionStorage.removeItem('just_dosa_admin_auth_time');
     setIsAdminAuthenticated(false);
     setAdminRole(null);
-    window.history.pushState({}, '', '/');
-    setPathname('/');
-    setHash('');
+    sessionStorage.setItem('just_dosa_skip_welcome_intro', 'true');
+    window.history.pushState({}, '', '#/admin');
+    setPathname('#/admin');
+    setHash('#/admin');
   };
 
   const handleResetDemo = () => {

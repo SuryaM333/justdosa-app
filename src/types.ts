@@ -43,6 +43,7 @@ export interface Booking {
   branchId?: string;
   isKalyanaVirundhu?: boolean;
   kalyanaSlot?: string;
+  source?: 'online' | 'phone/staff';
   alternativeDate?: string;
   alternativeTime?: string;
   alternativeIsKalyana?: boolean;

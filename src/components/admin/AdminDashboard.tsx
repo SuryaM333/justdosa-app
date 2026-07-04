@@ -9,6 +9,7 @@ import { SeatedTab } from './SeatedTab';
 import { CustomersTab } from './CustomersTab';
 import { SummaryTab } from './SummaryTab';
 import { SettingsTab } from './SettingsTab';
+import { NewBookingModal } from './NewBookingModal';
 import { playNewBookingChime } from '../../utils/sound';
 
 interface AdminDashboardProps {
@@ -23,6 +24,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole, onRes
   const [customers, setCustomers] = useState<Record<string, Customer>>({});
   const [selectedWaitingBooking, setSelectedWaitingBooking] = useState<Booking | null>(null);
   const [showFloorPlan, setShowFloorPlan] = useState(true);
+  const [isNewBookingOpen, setIsNewBookingOpen] = useState(false);
 
   const loadData = () => {
     setTables(dataService.getTables());
@@ -261,11 +263,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole, onRes
               selectedWaitingBooking={selectedWaitingBooking}
               onSelectWaitingBooking={setSelectedWaitingBooking}
               onRefresh={loadData}
+              onOpenNewBooking={() => setIsNewBookingOpen(true)}
             />
           )}
 
           {activeTab === 'booked' && (
-            <BookedTab bookings={bookings} customers={customers} onRefresh={loadData} />
+            <BookedTab 
+              bookings={bookings} 
+              customers={customers} 
+              onRefresh={loadData} 
+              onOpenNewBooking={() => setIsNewBookingOpen(true)}
+            />
           )}
 
           {activeTab === 'seated' && (
@@ -281,6 +289,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole, onRes
           {activeTab === 'settings' && adminRole === 'owner' && <SettingsTab />}
         </div>
       </div>
+
+      <NewBookingModal
+        isOpen={isNewBookingOpen}
+        onClose={() => setIsNewBookingOpen(false)}
+        onRefresh={loadData}
+        customers={customers}
+        bookings={bookings}
+      />
     </div>
   );
 };

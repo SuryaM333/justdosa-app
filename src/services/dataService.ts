@@ -791,6 +791,92 @@ export const dataService = {
     }
   },
 
+  async createManualBooking(data: {
+    firstName: string;
+    lastName?: string;
+    phone?: string;
+    partySize: number;
+    childSeats: number;
+    adultsCount?: number;
+    childrenCount?: number;
+    childrenHighChairs?: boolean[];
+    whatsappOptIn: boolean;
+    type: 'walk-in' | 'remote';
+    bookingDate?: string;
+    bookingTime?: string;
+    isKalyanaVirundhu?: boolean;
+    kalyanaSlot?: string;
+    status: 'confirmed' | 'waiting';
+    source: 'phone/staff';
+  }): Promise<Booking> {
+    try {
+      const cleanedPhone = data.phone ? cleanPhoneNumber(data.phone) : '';
+      const formattedPhone = cleanedPhone ? formatAusMobile(data.phone!) : '';
+
+      if (cleanedPhone) {
+        let customer = cachedCustomers[cleanedPhone];
+        if (!customer) {
+          customer = {
+            phone: formattedPhone,
+            firstName: data.firstName,
+            lastName: data.lastName || '',
+            totalVisits: 0,
+            lastVisitDate: new Date().toISOString(),
+            noShowCount: 0,
+            cancellationCount: 0,
+            whatsappOptIn: data.whatsappOptIn,
+            branchId: 'millpark',
+          };
+        } else {
+          if (data.firstName) customer.firstName = data.firstName;
+          if (data.lastName) customer.lastName = data.lastName;
+          customer.whatsappOptIn = data.whatsappOptIn;
+          if (!customer.branchId) customer.branchId = 'millpark';
+        }
+        await safeSetDoc(doc(db, 'customers', cleanedPhone), customer);
+      }
+
+      const bookingId = `bk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const newBooking: Booking = {
+        id: bookingId,
+        phone: formattedPhone,
+        firstName: data.firstName,
+        lastName: data.lastName || '',
+        partySize: data.partySize,
+        childSeats: data.childSeats,
+        adultsCount: data.adultsCount,
+        childrenCount: data.childrenCount,
+        childrenHighChairs: data.childrenHighChairs,
+        whatsappOptIn: data.whatsappOptIn,
+        type: data.type,
+        status: data.status,
+        createdAt: new Date().toISOString(),
+        bookingDate: data.type === 'walk-in' ? null : (data.bookingDate || null),
+        bookingTime: data.type === 'walk-in' ? null : (data.bookingTime || null),
+        isNewAlert: false,
+        branchId: 'millpark',
+        isKalyanaVirundhu: data.isKalyanaVirundhu || null,
+        kalyanaSlot: data.kalyanaSlot || null,
+        source: 'phone/staff',
+      };
+
+      if (newBooking.type === 'walk-in') {
+        newBooking.estimatedWaitMinutes = this.calculateEstimatedWait(getRequiredTableSeats(newBooking));
+      }
+
+      await safeSetDoc(doc(db, 'bookings', bookingId), newBooking);
+
+      if (newBooking.status === 'waiting') {
+        await this.updateAllWaitingEstimates();
+      }
+
+      return newBooking;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'bookings');
+      throw error;
+    }
+  },
+
   getWaitingQueuePosition(bookingId: string): { position: number; totalWaiting: number; estimatedWaitMinutes: number } {
     const bookings = this.getBookings();
     const waitingList = bookings
