@@ -74,7 +74,53 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     path
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('justDosaWriteError', { 
+      detail: { message: "Something went wrong, please try again or see staff." } 
+    }));
+  }
   throw new Error(JSON.stringify(errInfo));
+}
+
+export function sanitizeData<T>(obj: T): T {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeData(item)) as any;
+  }
+  if (typeof obj === 'object') {
+    const res: any = {};
+    for (const key of Object.keys(obj)) {
+      const val = (obj as any)[key];
+      if (val !== undefined) {
+        res[key] = sanitizeData(val);
+      }
+    }
+    return res;
+  }
+  return obj;
+}
+
+async function safeSetDoc(docRef: any, data: any, options?: any) {
+  const sanitized = sanitizeData(data);
+  if (options) {
+    return await setDoc(docRef, sanitized, options);
+  } else {
+    return await setDoc(docRef, sanitized);
+  }
+}
+
+async function safeDeleteDoc(docRef: any) {
+  return await deleteDoc(docRef);
+}
+
+async function safeCommitBatch(batch: any) {
+  return await batch.commit();
+}
+
+async function safeRunTransaction(db: any, updateFunction: (transaction: any) => Promise<any>) {
+  return await runTransaction(db, updateFunction);
 }
 
 // ----------------------------------------------------
@@ -337,7 +383,7 @@ function initFirestoreSync() {
   onSnapshot(settingsDocRef, async (docSnap) => {
     try {
       if (!docSnap.exists()) {
-        await setDoc(settingsDocRef, DEFAULT_SETTINGS);
+        await safeSetDoc(settingsDocRef, DEFAULT_SETTINGS);
       } else {
         cachedSettings = docSnap.data();
         notifyListeners();
@@ -355,7 +401,7 @@ function initFirestoreSync() {
     try {
       if (querySnap.empty) {
         for (const t of INITIAL_TABLES) {
-          await setDoc(doc(db, 'tables', t.id.toString()), t);
+          await safeSetDoc(doc(db, 'tables', t.id.toString()), t);
         }
       } else {
         const tables: Table[] = [];
@@ -380,7 +426,7 @@ function initFirestoreSync() {
       if (querySnap.empty) {
         const initialBookings = getInitialBookingsSeed();
         for (const b of initialBookings) {
-          await setDoc(doc(db, 'bookings', b.id), b);
+          await safeSetDoc(doc(db, 'bookings', b.id), b);
         }
       } else {
         const bookings: Booking[] = [];
@@ -404,7 +450,7 @@ function initFirestoreSync() {
       if (querySnap.empty) {
         const initialCustomers = getInitialCustomersSeed();
         for (const [phone, c] of Object.entries(initialCustomers)) {
-          await setDoc(doc(db, 'customers', phone), c);
+          await safeSetDoc(doc(db, 'customers', phone), c);
         }
       } else {
         const customers: Record<string, Customer> = {};
@@ -448,7 +494,7 @@ export const dataService = {
 
   async setStaffPin(pin: string) {
     try {
-      await setDoc(doc(db, 'settings', 'global'), { staffPin: pin }, { merge: true });
+      await safeSetDoc(doc(db, 'settings', 'global'), { staffPin: pin }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -456,7 +502,7 @@ export const dataService = {
 
   async setOwnerPin(pin: string) {
     try {
-      await setDoc(doc(db, 'settings', 'global'), { ownerPin: pin }, { merge: true });
+      await safeSetDoc(doc(db, 'settings', 'global'), { ownerPin: pin }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -468,7 +514,7 @@ export const dataService = {
 
   async setWhatsAppNumber(number: string) {
     try {
-      await setDoc(doc(db, 'settings', 'global'), { whatsappNumber: number }, { merge: true });
+      await safeSetDoc(doc(db, 'settings', 'global'), { whatsappNumber: number }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -480,7 +526,7 @@ export const dataService = {
 
   async setKalyanaCapacity(capacity: number) {
     try {
-      await setDoc(doc(db, 'settings', 'global'), { kalyanaCapacity: capacity }, { merge: true });
+      await safeSetDoc(doc(db, 'settings', 'global'), { kalyanaCapacity: capacity }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -492,7 +538,7 @@ export const dataService = {
 
   async setLunchStartTime(time: string) {
     try {
-      await setDoc(doc(db, 'settings', 'global'), { lunchStartTime: time }, { merge: true });
+      await safeSetDoc(doc(db, 'settings', 'global'), { lunchStartTime: time }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -504,7 +550,7 @@ export const dataService = {
 
   async setLunchEndTime(time: string) {
     try {
-      await setDoc(doc(db, 'settings', 'global'), { lunchEndTime: time }, { merge: true });
+      await safeSetDoc(doc(db, 'settings', 'global'), { lunchEndTime: time }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -516,7 +562,7 @@ export const dataService = {
 
   async setDinnerStartTime(time: string) {
     try {
-      await setDoc(doc(db, 'settings', 'global'), { dinnerStartTime: time }, { merge: true });
+      await safeSetDoc(doc(db, 'settings', 'global'), { dinnerStartTime: time }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -528,7 +574,7 @@ export const dataService = {
 
   async setDinnerEndTime(time: string) {
     try {
-      await setDoc(doc(db, 'settings', 'global'), { dinnerEndTime: time }, { merge: true });
+      await safeSetDoc(doc(db, 'settings', 'global'), { dinnerEndTime: time }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -555,7 +601,7 @@ export const dataService = {
     proposalNote?: string
   ) {
     try {
-      await setDoc(doc(db, 'bookings', bookingId), {
+      await safeSetDoc(doc(db, 'bookings', bookingId), {
         status: 'alternative_proposed',
         alternativeDate: altDate,
         alternativeTime: altTime,
@@ -577,7 +623,7 @@ export const dataService = {
         const booking = snap.data() as Booking;
         const newBookingDate = booking.alternativeDate;
         const newBookingTime = booking.isKalyanaVirundhu ? booking.kalyanaSlot : booking.alternativeTime;
-        await setDoc(docRef, {
+        await safeSetDoc(docRef, {
           status: 'confirmed',
           bookingDate: newBookingDate,
           bookingTime: newBookingTime,
@@ -592,7 +638,7 @@ export const dataService = {
 
   async declineAlternativeTime(bookingId: string) {
     try {
-      await setDoc(doc(db, 'bookings', bookingId), {
+      await safeSetDoc(doc(db, 'bookings', bookingId), {
         status: 'cancelled'
       }, { merge: true });
     } catch (error) {
@@ -701,7 +747,7 @@ export const dataService = {
         customer.whatsappOptIn = data.whatsappOptIn;
         if (!customer.branchId) customer.branchId = 'millpark';
       }
-      await setDoc(doc(db, 'customers', cleanedPhone), customer);
+      await safeSetDoc(doc(db, 'customers', cleanedPhone), customer);
 
       const bookingId = `bk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       const newBooking: Booking = {
@@ -718,19 +764,19 @@ export const dataService = {
         type: data.type,
         status: data.type === 'walk-in' ? 'waiting' : 'pending',
         createdAt: new Date().toISOString(),
-        bookingDate: data.bookingDate,
-        bookingTime: data.bookingTime,
+        bookingDate: data.type === 'walk-in' ? null : (data.bookingDate || null),
+        bookingTime: data.type === 'walk-in' ? null : (data.bookingTime || null),
         isNewAlert: true,
         branchId: 'millpark',
-        isKalyanaVirundhu: data.isKalyanaVirundhu,
-        kalyanaSlot: data.kalyanaSlot,
+        isKalyanaVirundhu: data.isKalyanaVirundhu || null,
+        kalyanaSlot: data.kalyanaSlot || null,
       };
 
       if (newBooking.type === 'walk-in') {
         newBooking.estimatedWaitMinutes = this.calculateEstimatedWait(getRequiredTableSeats(newBooking));
       }
 
-      await setDoc(doc(db, 'bookings', bookingId), newBooking);
+      await safeSetDoc(doc(db, 'bookings', bookingId), newBooking);
 
       if (newBooking.status === 'waiting') {
         await this.updateAllWaitingEstimates();
@@ -788,7 +834,7 @@ export const dataService = {
 
   async allocateTable(bookingId: string, tableId: number): Promise<{ success: boolean; error?: string }> {
     try {
-      const result = await runTransaction(db, async (transaction) => {
+      const result = await safeRunTransaction(db, async (transaction) => {
         const tableDocRef = doc(db, 'tables', tableId.toString());
         const bookingDocRef = doc(db, 'bookings', bookingId);
 
@@ -821,17 +867,17 @@ export const dataService = {
           };
         }
 
-        transaction.update(tableDocRef, {
+        transaction.update(tableDocRef, sanitizeData({
           isOccupied: true,
           currentBookingId: booking.id
-        });
+        }));
 
-        transaction.update(bookingDocRef, {
+        transaction.update(bookingDocRef, sanitizeData({
           status: 'seated',
           tableId: tableId,
           seatedAt: new Date().toISOString(),
           isNewAlert: false
-        });
+        }));
 
         return { success: true };
       });
@@ -843,7 +889,12 @@ export const dataService = {
       return result;
     } catch (error) {
       console.error("Allocation transaction error:", error);
-      return { success: false, error: 'table just taken' };
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('justDosaWriteError', { 
+          detail: { message: "Something went wrong, please try again or see staff." } 
+        }));
+      }
+      return { success: false, error: 'Something went wrong, please try again or see staff.' };
     }
   },
 
@@ -862,7 +913,7 @@ export const dataService = {
         const booking = bookingSnap.data() as Booking;
         const finishedAt = new Date().toISOString();
 
-        await setDoc(bookingDocRef, {
+        await safeSetDoc(bookingDocRef, {
           status: 'finished',
           finishedAt
         }, { merge: true });
@@ -872,14 +923,14 @@ export const dataService = {
         const customerSnap = await getDoc(customerDocRef);
         if (customerSnap.exists()) {
           const customer = customerSnap.data() as Customer;
-          await setDoc(customerDocRef, {
+          await safeSetDoc(customerDocRef, {
             totalVisits: (customer.totalVisits || 0) + 1,
             lastVisitDate: finishedAt,
             firstName: booking.firstName || customer.firstName,
             lastName: booking.lastName || customer.lastName
           }, { merge: true });
         } else {
-          await setDoc(customerDocRef, {
+          await safeSetDoc(customerDocRef, {
             phone: booking.phone,
             firstName: booking.firstName,
             lastName: booking.lastName,
@@ -893,7 +944,7 @@ export const dataService = {
         }
       }
 
-      await setDoc(tableDocRef, {
+      await safeSetDoc(tableDocRef, {
         isOccupied: false,
         currentBookingId: null
       }, { merge: true });
@@ -906,7 +957,7 @@ export const dataService = {
 
   async markBookingArrived(bookingId: string) {
     try {
-      await setDoc(doc(db, 'bookings', bookingId), {
+      await safeSetDoc(doc(db, 'bookings', bookingId), {
         status: 'waiting',
         createdAt: new Date().toISOString()
       }, { merge: true });
@@ -918,7 +969,7 @@ export const dataService = {
 
   async confirmBooking(bookingId: string) {
     try {
-      await setDoc(doc(db, 'bookings', bookingId), {
+      await safeSetDoc(doc(db, 'bookings', bookingId), {
         status: 'confirmed',
         isNewAlert: false
       }, { merge: true });
@@ -929,7 +980,7 @@ export const dataService = {
 
   async declineBooking(bookingId: string) {
     try {
-      await setDoc(doc(db, 'bookings', bookingId), {
+      await safeSetDoc(doc(db, 'bookings', bookingId), {
         status: 'declined',
         isNewAlert: false
       }, { merge: true });
@@ -944,7 +995,7 @@ export const dataService = {
       if (newTime) {
         const snap = await getDoc(docRef);
         const booking = snap.exists() ? (snap.data() as Booking) : null;
-        await setDoc(docRef, {
+        await safeSetDoc(docRef, {
           previousBookingDate: booking?.bookingDate || null,
           previousBookingTime: booking?.bookingTime || null,
           bookingDate: noteOrDate,
@@ -954,7 +1005,7 @@ export const dataService = {
           isNewAlert: true
         }, { merge: true });
       } else {
-        await setDoc(docRef, {
+        await safeSetDoc(docRef, {
           changeRequestedNote: noteOrDate,
           status: 'pending',
           isNewAlert: true
@@ -989,16 +1040,23 @@ export const dataService = {
         seatedAt: new Date().toISOString(),
         tableId,
         branchId: 'millpark',
+        bookingDate: null,
+        bookingTime: null,
       };
 
-      await setDoc(doc(db, 'bookings', bookingId), newBooking);
-      await setDoc(tableDocRef, { isOccupied: true, currentBookingId: bookingId }, { merge: true });
+      await safeSetDoc(doc(db, 'bookings', bookingId), newBooking);
+      await safeSetDoc(tableDocRef, { isOccupied: true, currentBookingId: bookingId }, { merge: true });
       await this.updateAllWaitingEstimates();
 
       return { success: true };
     } catch (error) {
       console.error("seatWalkInDirectly error:", error);
-      return { success: false, error: error instanceof Error ? error.message : 'Failed to seat walk-in' };
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('justDosaWriteError', { 
+          detail: { message: "Something went wrong, please try again or see staff." } 
+        }));
+      }
+      return { success: false, error: 'Something went wrong, please try again or see staff.' };
     }
   },
 
@@ -1008,7 +1066,7 @@ export const dataService = {
       const snap = await getDoc(docRef);
       if (snap.exists()) {
         const booking = snap.data() as Booking;
-        await setDoc(docRef, {
+        await safeSetDoc(docRef, {
           status: 'no-show'
         }, { merge: true });
 
@@ -1017,7 +1075,7 @@ export const dataService = {
         const custSnap = await getDoc(customerDocRef);
         if (custSnap.exists()) {
           const cust = custSnap.data() as Customer;
-          await setDoc(customerDocRef, {
+          await safeSetDoc(customerDocRef, {
             noShowCount: (cust.noShowCount || 0) + 1
           }, { merge: true });
         }
@@ -1034,7 +1092,7 @@ export const dataService = {
       const snap = await getDoc(docRef);
       if (snap.exists()) {
         const booking = snap.data() as Booking;
-        await setDoc(docRef, {
+        await safeSetDoc(docRef, {
           status: 'cancelled'
         }, { merge: true });
 
@@ -1043,7 +1101,7 @@ export const dataService = {
         const custSnap = await getDoc(customerDocRef);
         if (custSnap.exists()) {
           const cust = custSnap.data() as Customer;
-          await setDoc(customerDocRef, {
+          await safeSetDoc(customerDocRef, {
             cancellationCount: (cust.cancellationCount || 0) + 1
           }, { merge: true });
         }
@@ -1063,13 +1121,13 @@ export const dataService = {
           const q = this.getWaitingQueuePosition(b.id);
           if (b.estimatedWaitMinutes !== q.estimatedWaitMinutes) {
             const docRef = doc(db, 'bookings', b.id);
-            batch.update(docRef, { estimatedWaitMinutes: q.estimatedWaitMinutes });
+            batch.update(docRef, sanitizeData({ estimatedWaitMinutes: q.estimatedWaitMinutes }));
             modified = true;
           }
         }
       });
       if (modified) {
-        await batch.commit();
+        await safeCommitBatch(batch);
       }
     } catch (err) {
       console.error("Error in updateAllWaitingEstimates:", err);
@@ -1083,12 +1141,12 @@ export const dataService = {
       cachedBookings.forEach((b) => {
         if (b.isNewAlert && ((tabType === 'waiting' && b.status === 'waiting') || (tabType === 'booked' && b.status === 'booked'))) {
           const docRef = doc(db, 'bookings', b.id);
-          batch.update(docRef, { isNewAlert: false });
+          batch.update(docRef, sanitizeData({ isNewAlert: false }));
           modified = true;
         }
       });
       if (modified) {
-        await batch.commit();
+        await safeCommitBatch(batch);
       }
     } catch (error) {
       console.error("clearNewAlerts error:", error);
@@ -1111,7 +1169,7 @@ export const dataService = {
       .filter((b) => b.status === 'seated' || b.status === 'finished')
       .reduce((sum, b) => sum + b.partySize, 0);
 
-    const seatedWalkIns = todayBookings.filter((b) => b.seatedAt && b.type === 'walk-in');
+    const seatedWalkIns = todayBookings.filter((b) => b.seatedAt && (b.type === 'walk-in' || b.type === 'walkskin'));
     let totalWaitMins = 0;
     seatedWalkIns.forEach((b) => {
       const waitMs = new Date(b.seatedAt!).getTime() - new Date(b.createdAt).getTime();
@@ -1163,7 +1221,7 @@ export const dataService = {
   async deleteCustomer(phoneKey: string) {
     try {
       const cleaned = cleanPhoneNumber(phoneKey);
-      await deleteDoc(doc(db, 'customers', cleaned));
+      await safeDeleteDoc(doc(db, 'customers', cleaned));
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `customers/${phoneKey}`);
     }
@@ -1203,21 +1261,21 @@ export const dataService = {
       primary.whatsappOptIn = primary.whatsappOptIn || secondary.whatsappOptIn;
 
       const batch = writeBatch(db);
-      batch.set(primaryDocRef, primary);
+      batch.set(primaryDocRef, sanitizeData(primary));
       batch.delete(secondaryDocRef);
 
       cachedBookings.forEach(b => {
         if (cleanPhoneNumber(b.phone) === secondaryClean) {
           const bookingDocRef = doc(db, 'bookings', b.id);
-          batch.update(bookingDocRef, {
+          batch.update(bookingDocRef, sanitizeData({
             phone: primary.phone,
             firstName: primary.firstName,
             lastName: primary.lastName
-          });
+          }));
         }
       });
 
-      await batch.commit();
+      await safeCommitBatch(batch);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'customers');
     }
@@ -1237,7 +1295,7 @@ export const dataService = {
         batch.delete(doc(db, 'customers', phone));
       });
 
-      await batch.commit();
+      await safeCommitBatch(batch);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, 'all');
     }

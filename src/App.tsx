@@ -65,10 +65,18 @@ export default function App() {
     window.addEventListener('popstate', handleLocationChange);
     window.addEventListener('hashchange', handleLocationChange);
 
+    const handleWriteError = (e: Event) => {
+      const customEvent = e as CustomEvent<{ message: string }>;
+      setToastMsg(customEvent.detail?.message || 'Something went wrong, please try again or see staff.');
+      setTimeout(() => setToastMsg(null), 5000);
+    };
+    window.addEventListener('justDosaWriteError', handleWriteError);
+
     return () => {
       unsubscribe();
       window.removeEventListener('popstate', handleLocationChange);
       window.removeEventListener('hashchange', handleLocationChange);
+      window.removeEventListener('justDosaWriteError', handleWriteError);
     };
   }, [isDarkMode]);
 
