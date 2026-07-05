@@ -190,7 +190,7 @@ export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRef
   const [altDate, setAltDate] = React.useState('');
   const [altTime, setAltTime] = React.useState('18:30');
   const [altIsKalyana, setAltIsKalyana] = React.useState(false);
-  const [altKalyanaSlot, setAltKalyanaSlot] = React.useState('Slot 1: 11:00am-12:30pm');
+  const [altKalyanaSlot, setAltKalyanaSlot] = React.useState(() => dataService.getKalyanaSlots()[0]?.range || 'Slot 1: 11:00am-12:30pm');
   const [altNote, setAltNote] = React.useState('');
   const [shareProposalModal, setShareProposalModal] = React.useState<{
     id: string;
@@ -239,11 +239,12 @@ export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRef
                   )}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {['Slot 1: 11:00am-12:30pm', 'Slot 2: 12:30pm-2:00pm', 'Slot 3: 2:00pm-3:30pm'].map((slot) => {
+                  {dataService.getKalyanaSlots().map((slotObj) => {
+                    const slot = slotObj.range;
                     const guests = bookings
                       .filter((b) => b.bookingDate === date && b.isKalyanaVirundhu && b.kalyanaSlot === slot && ['pending', 'confirmed', 'booked'].includes(b.status))
                       .reduce((sum, b) => sum + (b.partySize || 0), 0);
-                    const capacity = dataService.getKalyanaCapacity();
+                    const capacity = slotObj.capacity;
                     const percent = Math.min(100, Math.round((guests / capacity) * 100));
                     return (
                       <div key={slot} className="bg-white dark:bg-[#26221E] p-2.5 rounded-lg border border-[#E8E2D2] dark:border-[#3D352E] text-xs">
@@ -473,7 +474,7 @@ export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRef
                             setAltDate(booking.bookingDate || '');
                             setAltTime(booking.bookingTime || '18:30');
                             setAltIsKalyana(booking.isKalyanaVirundhu || false);
-                            setAltKalyanaSlot(booking.kalyanaSlot || 'Slot 1: 11:00am-12:30pm');
+                            setAltKalyanaSlot(booking.kalyanaSlot || dataService.getKalyanaSlots()[0]?.range || 'Slot 1: 11:00am-12:30pm');
                             setAltNote('');
                           }}
                           className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition-all shadow-md flex items-center gap-1.5"
@@ -589,9 +590,9 @@ export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRef
                             onChange={(e) => setAltKalyanaSlot(e.target.value)}
                             className="w-full px-3 py-1.5 rounded-lg border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-xs text-[#2D2926] dark:text-white"
                           >
-                            <option value="Slot 1: 11:00am-12:30pm">Slot 1: 11:00am-12:30pm</option>
-                            <option value="Slot 2: 12:30pm-2:00pm">Slot 2: 12:30pm-2:00pm</option>
-                            <option value="Slot 3: 2:00pm-3:30pm">Slot 3: 2:00pm-3:30pm</option>
+                            {dataService.getKalyanaSlots().map((s) => (
+                              <option key={s.id} value={s.range}>{s.range}</option>
+                            ))}
                           </select>
                         </div>
                       ) : (

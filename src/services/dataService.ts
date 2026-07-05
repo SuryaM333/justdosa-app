@@ -152,7 +152,37 @@ const DEFAULT_SETTINGS = {
   lunchStartTime: '11:00',
   lunchEndTime: '15:00',
   dinnerStartTime: '17:30',
-  dinnerEndTime: '22:00'
+  dinnerEndTime: '22:00',
+  openingHours: {
+    '0': { isOpen: true, lunchOpen: true, lunchStart: '11:00', lunchEnd: '15:00', dinnerOpen: true, dinnerStart: '17:30', dinnerEnd: '22:00' }, // Sun
+    '1': { isOpen: true, lunchOpen: false, lunchStart: '11:00', lunchEnd: '15:00', dinnerOpen: true, dinnerStart: '17:30', dinnerEnd: '22:00' }, // Mon
+    '2': { isOpen: false, lunchOpen: false, lunchStart: '11:00', lunchEnd: '15:00', dinnerOpen: false, dinnerStart: '17:30', dinnerEnd: '22:00' }, // Tue
+    '3': { isOpen: true, lunchOpen: false, lunchStart: '11:00', lunchEnd: '15:00', dinnerOpen: true, dinnerStart: '17:30', dinnerEnd: '22:00' }, // Wed
+    '4': { isOpen: true, lunchOpen: false, lunchStart: '11:00', lunchEnd: '15:00', dinnerOpen: true, dinnerStart: '17:30', dinnerEnd: '22:00' }, // Thu
+    '5': { isOpen: true, lunchOpen: false, lunchStart: '11:00', lunchEnd: '15:00', dinnerOpen: true, dinnerStart: '17:30', dinnerEnd: '22:00' }, // Fri
+    '6': { isOpen: true, lunchOpen: true, lunchStart: '11:00', lunchEnd: '15:00', dinnerOpen: true, dinnerStart: '17:30', dinnerEnd: '22:00' }, // Sat
+  },
+  lunchBuffer: 30,
+  dinnerBuffer: 30,
+  slotInterval: 15,
+  kalyanaEnabled: true,
+  kalyanaSlots: [
+    { id: '1', range: 'Slot 1: 11:00am-12:30pm', capacity: 40 },
+    { id: '2', range: 'Slot 2: 12:30pm-2:00pm', capacity: 40 },
+    { id: '3', range: 'Slot 3: 2:00pm-3:30pm', capacity: 40 }
+  ],
+  customerTexts: {
+    welcomeLine: 'Select an option below to join the live queue or reserve for later.',
+    waitingReassurance: 'Please wait — our team will allocate your table shortly.',
+    tableReadyTemplate: 'Your table {table} is ready! Welcome, {name}. Please make your way to the host.',
+    thankYouMessage: 'Thank you for dining with us! We hope you enjoyed your Ney Dosa Feast.',
+    noOrderingUrlNote: "Please ask our staff for the menu — we'll take your order at the table."
+  },
+  waitTimeAlertThresholds: {
+    low: 10,
+    medium: 15,
+    high: 20
+  }
 };
 
 const INITIAL_TABLES: Table[] = [
@@ -328,7 +358,7 @@ export const dataService = {
   },
 
   getLunchStartTime(): string {
-    return cachedSettings?.lunchStartTime || '11:00';
+    return cachedSettings?.openingHours?.[0]?.lunchStart || cachedSettings?.lunchStartTime || '11:00';
   },
 
   async setLunchStartTime(time: string) {
@@ -340,7 +370,7 @@ export const dataService = {
   },
 
   getLunchEndTime(): string {
-    return cachedSettings?.lunchEndTime || '15:00';
+    return cachedSettings?.openingHours?.[0]?.lunchEnd || cachedSettings?.lunchEndTime || '15:00';
   },
 
   async setLunchEndTime(time: string) {
@@ -352,7 +382,7 @@ export const dataService = {
   },
 
   getDinnerStartTime(): string {
-    return cachedSettings?.dinnerStartTime || '17:30';
+    return cachedSettings?.openingHours?.[0]?.dinnerStart || cachedSettings?.dinnerStartTime || '17:30';
   },
 
   async setDinnerStartTime(time: string) {
@@ -364,12 +394,108 @@ export const dataService = {
   },
 
   getDinnerEndTime(): string {
-    return cachedSettings?.dinnerEndTime || '22:00';
+    return cachedSettings?.openingHours?.[0]?.dinnerEnd || cachedSettings?.dinnerEndTime || '22:00';
   },
 
   async setDinnerEndTime(time: string) {
     try {
       await safeSetDoc(doc(db, 'settings', 'global'), { dinnerEndTime: time }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  getOpeningHours(): Record<string, { isOpen: boolean; lunchOpen: boolean; lunchStart: string; lunchEnd: string; dinnerOpen: boolean; dinnerStart: string; dinnerEnd: string }> {
+    return cachedSettings?.openingHours || DEFAULT_SETTINGS.openingHours;
+  },
+
+  async setOpeningHours(openingHours: any) {
+    try {
+      await safeSetDoc(doc(db, 'settings', 'global'), { openingHours }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  getLunchBuffer(): number {
+    return cachedSettings?.lunchBuffer !== undefined ? cachedSettings.lunchBuffer : 30;
+  },
+
+  async setLunchBuffer(buffer: number) {
+    try {
+      await safeSetDoc(doc(db, 'settings', 'global'), { lunchBuffer: buffer }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  getDinnerBuffer(): number {
+    return cachedSettings?.dinnerBuffer !== undefined ? cachedSettings.dinnerBuffer : 30;
+  },
+
+  async setDinnerBuffer(buffer: number) {
+    try {
+      await safeSetDoc(doc(db, 'settings', 'global'), { dinnerBuffer: buffer }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  getSlotInterval(): number {
+    return cachedSettings?.slotInterval !== undefined ? cachedSettings.slotInterval : 15;
+  },
+
+  async setSlotInterval(interval: number) {
+    try {
+      await safeSetDoc(doc(db, 'settings', 'global'), { slotInterval: interval }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  isKalyanaEnabled(): boolean {
+    return cachedSettings?.kalyanaEnabled !== undefined ? cachedSettings.kalyanaEnabled : true;
+  },
+
+  async setKalyanaEnabled(enabled: boolean) {
+    try {
+      await safeSetDoc(doc(db, 'settings', 'global'), { kalyanaEnabled: enabled }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  getKalyanaSlots(): { id: string; range: string; capacity: number }[] {
+    return cachedSettings?.kalyanaSlots || DEFAULT_SETTINGS.kalyanaSlots;
+  },
+
+  async setKalyanaSlots(slots: any[]) {
+    try {
+      await safeSetDoc(doc(db, 'settings', 'global'), { kalyanaSlots: slots }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  getCustomerTexts(): { welcomeLine: string; waitingReassurance: string; tableReadyTemplate: string; thankYouMessage: string; noOrderingUrlNote: string } {
+    return cachedSettings?.customerTexts || DEFAULT_SETTINGS.customerTexts;
+  },
+
+  async setCustomerTexts(customerTexts: any) {
+    try {
+      await safeSetDoc(doc(db, 'settings', 'global'), { customerTexts }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  getWaitTimeAlertThresholds(): { low: number; medium: number; high: number } {
+    return cachedSettings?.waitTimeAlertThresholds || DEFAULT_SETTINGS.waitTimeAlertThresholds;
+  },
+
+  async setWaitTimeAlertThresholds(waitTimeAlertThresholds: { low: number; medium: number; high: number }) {
+    try {
+      await safeSetDoc(doc(db, 'settings', 'global'), { waitTimeAlertThresholds }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -445,13 +571,7 @@ export const dataService = {
     if (cachedTables.length === 0) {
       return INITIAL_TABLES;
     }
-    const updated = cachedTables.map(t => {
-      if (t.id === 7) {
-        return { ...t, isInactive: false, maxOverrideCapacity: 3 };
-      }
-      return t;
-    });
-    return updated;
+    return cachedTables;
   },
 
   async saveTables(tables: Table[]) {

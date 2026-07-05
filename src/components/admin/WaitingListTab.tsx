@@ -44,16 +44,17 @@ export const WaitingListTab: React.FC<WaitingListTabProps> = ({
   const playedAlertsRef = useRef<Record<string, 'warning' | 'critical'>>({});
 
   useEffect(() => {
+    const thresholds = dataService.getWaitTimeAlertThresholds();
     waitingList.forEach((booking) => {
       const diffMins = Math.max(0, Math.round((Date.now() - new Date(booking.createdAt).getTime()) / 60000));
       const alreadyPlayed = playedAlertsRef.current[booking.id];
 
-      if (diffMins >= 20) {
+      if (diffMins >= thresholds.high) {
         if (alreadyPlayed !== 'critical') {
           playWaitAlertSound('critical');
           playedAlertsRef.current[booking.id] = 'critical';
         }
-      } else if (diffMins >= 15) {
+      } else if (diffMins >= thresholds.medium) {
         if (!alreadyPlayed) {
           playWaitAlertSound('warning');
           playedAlertsRef.current[booking.id] = 'warning';
@@ -176,27 +177,28 @@ export const WaitingListTab: React.FC<WaitingListTabProps> = ({
             let alertStyle = '';
             let alertBadge = null;
             
-            if (diffMins >= 20) {
+            const thresholds = dataService.getWaitTimeAlertThresholds();
+            if (diffMins >= thresholds.high) {
               alertStyle = 'border-rose-500 bg-rose-50/20 dark:bg-rose-950/10 ring-1 ring-rose-500/20 animate-pulse';
               alertBadge = (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-rose-600 dark:bg-rose-950 text-white dark:text-rose-300 text-[10px] font-black tracking-wider animate-[bounce_1.5s_infinite]">
                   <AlertTriangle className="w-3.5 h-3.5" />
-                  <span>CRITICAL WAIT (20m+)</span>
+                  <span>CRITICAL WAIT ({thresholds.high}m+)</span>
                 </span>
               );
-            } else if (diffMins >= 15) {
+            } else if (diffMins >= thresholds.medium) {
               alertStyle = 'border-amber-500 bg-amber-50/15 dark:bg-amber-950/5';
               alertBadge = (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500 text-white text-[10px] font-bold tracking-wider">
                   <AlertTriangle className="w-3.5 h-3.5" />
-                  <span>LONG WAIT (15m+)</span>
+                  <span>LONG WAIT ({thresholds.medium}m+)</span>
                 </span>
               );
-            } else if (diffMins >= 10) {
+            } else if (diffMins >= thresholds.low) {
               alertStyle = 'border-yellow-500/60 bg-yellow-50/5';
               alertBadge = (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-yellow-100 dark:bg-yellow-950/20 text-yellow-800 dark:text-yellow-400 text-[10px] font-bold border border-yellow-200 dark:border-yellow-900">
-                  <span>Delayed (10m+)</span>
+                  <span>Delayed ({thresholds.low}m+)</span>
                 </span>
               );
             }

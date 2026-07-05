@@ -80,7 +80,7 @@ export const CustomerView: React.FC = () => {
   });
   const [bookingTime, setBookingTime] = useState('18:30');
   const [saturdayMenuType, setSaturdayMenuType] = useState<'regular' | 'kalyana' | null>(null);
-  const [kalyanaSlot, setKalyanaSlot] = useState('Slot 1: 11:00am-12:30pm');
+  const [kalyanaSlot, setKalyanaSlot] = useState(() => dataService.getKalyanaSlots()[0]?.range || 'Slot 1: 11:00am-12:30pm');
   const [errorMsg, setErrorMsg] = useState('');
   const [showChangeForm, setShowChangeForm] = useState(false);
   const [changeNote, setChangeNote] = useState('');
@@ -93,9 +93,49 @@ export const CustomerView: React.FC = () => {
     return date.getDay();
   };
 
+  const getGroupedHours = () => {
+    const hours = dataService.getOpeningHours();
+    const formatTimeStr = (hhmm: string) => {
+      if (!hhmm) return '';
+      const [h, m] = hhmm.split(':').map(Number);
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      const displayH = h > 12 ? h - 12 : (h === 0 ? 12 : h);
+      return `${displayH}:${m.toString().padStart(2, '0')} ${ampm}`;
+    };
+
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const groups: Record<string, string[]> = {};
+
+    dayNames.forEach((name, idx) => {
+      const config = hours[idx.toString()] || hours[idx];
+      let key = 'Closed';
+      if (config && config.isOpen) {
+        const services = [];
+        if (config.lunchOpen && config.lunchStart && config.lunchEnd) {
+          services.push(`Lunch ${formatTimeStr(config.lunchStart)} - ${formatTimeStr(config.lunchEnd)}`);
+        }
+        if (config.dinnerOpen && config.dinnerStart && config.dinnerEnd) {
+          services.push(`Dinner ${formatTimeStr(config.dinnerStart)} - ${formatTimeStr(config.dinnerEnd)}`);
+        }
+        key = services.join(' & ') || 'Closed';
+      }
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(name);
+    });
+
+    return Object.entries(groups).map(([schedule, days]) => {
+      let daysStr = days.join(', ');
+      if (daysStr === 'Mon, Tue, Wed, Thu, Fri, Sat, Sun') daysStr = 'Everyday';
+      else if (daysStr === 'Mon, Wed, Thu, Fri') daysStr = 'Mon, Wed-Fri';
+      else if (daysStr === 'Sat, Sun') daysStr = 'Sat-Sun';
+      
+      return { days: daysStr, schedule };
+    });
+  };
+
   useEffect(() => {
     const day = getDayOfWeek(bookingDate);
-    if (day === 6) {
+    if (day === 6 && dataService.isKalyanaEnabled()) {
       if (!saturdayMenuType) {
         setSaturdayMenuType('kalyana');
       }
@@ -209,8 +249,10 @@ export const CustomerView: React.FC = () => {
     }
 
     const day = getDayOfWeek(bookingDate);
-    if (activeTab === 'remote' && day === 2) {
-      setErrorMsg("We're closed on Tuesdays. Please pick another day.");
+    const hours = dataService.getOpeningHours();
+    const dayConfig = hours[day.toString()] || hours[day];
+    if (activeTab === 'remote' && dayConfig && !dayConfig.isOpen) {
+      setErrorMsg(`We're closed on ${['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'][day]}. Please pick another day.`);
       return;
     }
 
@@ -218,11 +260,12 @@ export const CustomerView: React.FC = () => {
 
     const totalGuests = adultsCount + childrenCount;
     const highChairsNeeded = childrenHighChairs.filter(Boolean).length;
-    const isKalyana = activeTab === 'remote' && day === 6 && saturdayMenuType === 'kalyana';
+    const isKalyana = activeTab === 'remote' && day === 6 && dataService.isKalyanaEnabled() && saturdayMenuType === 'kalyana';
 
     if (isKalyana) {
       const guestsInSlot = getSlotGuestsCount(kalyanaSlot);
-      const capacity = dataService.getKalyanaCapacity();
+      const slotConfig = dataService.getKalyanaSlots().find(s => s.range === kalyanaSlot);
+      const capacity = slotConfig ? slotConfig.capacity : dataService.getKalyanaCapacity();
       if (guestsInSlot + totalGuests > capacity) {
         setErrorMsg(`Selected Kalyana Virundhu slot is fully booked. Only ${capacity - guestsInSlot} seats left.`);
         return;
@@ -355,7 +398,7 @@ export const CustomerView: React.FC = () => {
                 Thank you for dining with us, {activeBooking.firstName}!
               </h2>
               <p className="text-sm text-[#B8ACA0] mb-8">
-                We hope you enjoyed your meal. We hope to see you again soon!
+                {dataService.getCustomerTexts().thankYouMessage}
               </p>
               
               <button
@@ -378,7 +421,9 @@ export const CustomerView: React.FC = () => {
                 Welcome to Just Dosa, {activeBooking.firstName}! 🎉
               </h2>
               <p className="text-sm text-[#B8ACA0] mb-6">
-                Your table is ready. Our team is ready to serve you freshly prepared food at your service.
+                {dataService.getCustomerTexts().tableReadyTemplate
+                  .replace(/{name}/g, activeBooking.firstName)
+                  .replace(/{table}/g, activeBooking.tableId?.toString() || '')}
               </p>
               <div className="my-6 bg-[#1C1917] border-2 border-[#3D352E] rounded-2xl p-6">
                 <p className="text-xs uppercase tracking-wider text-[#D2B48C] font-bold mb-1">
@@ -392,7 +437,7 @@ export const CustomerView: React.FC = () => {
                   <div className="mt-4 pt-4 border-t border-[#3D352E] text-left">
                     {(activeBooking.tableId?.toString() === '6' || activeBooking.tableId?.toString() === '7' || !orderingUrl || orderingUrl.includes('table-6') || orderingUrl.includes('table-7')) ? (
                       <div className="text-xs font-semibold text-[#D2B48C] text-center bg-[#26221E] border border-[#3D352E] p-3.5 rounded-xl mb-3 leading-relaxed">
-                        Please ask our staff for the menu — we'll take your order at the table.
+                        {dataService.getCustomerTexts().noOrderingUrlNote}
                       </div>
                     ) : (
                       <a
@@ -439,7 +484,7 @@ export const CustomerView: React.FC = () => {
                   </span>
                   <div className="pt-3 border-t border-[#3D352E]/60 text-xs sm:text-sm font-semibold text-[#D2B48C] flex items-center justify-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-[#E37A08] animate-pulse shrink-0" />
-                    <span>Please wait — our team will allocate your table shortly.</span>
+                    <span>{dataService.getCustomerTexts().waitingReassurance}</span>
                   </div>
                 </div>
               </div>
@@ -852,25 +897,26 @@ export const CustomerView: React.FC = () => {
               Welcome to <span className="text-[#8B4513] dark:text-[#D2B48C]">Just Dosa</span>
             </h1>
             <p className="text-sm text-[#6B5E4C] dark:text-[#B8ACA0] mb-4">
-              Select an option below to join the live queue or reserve for later.
+              {dataService.getCustomerTexts().welcomeLine}
             </p>
 
             {/* Operating Hours Info Badge */}
             <div className="mt-4 inline-flex flex-col sm:flex-row flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-[11px] text-[#6B5E4C] dark:text-[#B8ACA0] bg-[#F5F2EA]/60 dark:bg-[#26221E]/40 px-4 py-2.5 rounded-2xl border border-[#E8E2D2]/60 dark:border-[#3D352E]/60 max-w-lg mx-auto shadow-2xs font-medium">
-              <div className="flex items-center gap-1.5">
-                <span className="inline-block w-2 h-2 rounded-full bg-rose-500 shrink-0" />
-                <span><strong className="font-bold">Tue:</strong> Closed</span>
-              </div>
-              <div className="hidden sm:block text-[#E8E2D2] dark:text-[#3D352E]">|</div>
-              <div className="flex items-center gap-1.5">
-                <span className="inline-block w-2 h-2 rounded-full bg-amber-500 shrink-0" />
-                <span><strong className="font-bold">Mon, Wed-Fri:</strong> Dinner 5:30 PM - 10:00 PM</span>
-              </div>
-              <div className="hidden sm:block text-[#E8E2D2] dark:text-[#3D352E]">|</div>
-              <div className="flex items-center gap-1.5">
-                <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-                <span><strong className="font-bold">Sat-Sun:</strong> Lunch 11:00 AM - 3:00 PM &amp; Dinner 5:30 PM - 10:00 PM</span>
-              </div>
+              {getGroupedHours().map((group, idx) => {
+                const isClosed = group.schedule === 'Closed';
+                const bulletColor = isClosed ? 'bg-rose-500' : idx === 1 ? 'bg-amber-500' : 'bg-emerald-500';
+                return (
+                  <React.Fragment key={idx}>
+                    {idx > 0 && <div className="hidden sm:block text-[#E8E2D2] dark:text-[#3D352E]">|</div>}
+                    <div className="flex items-center gap-1.5">
+                      <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${bulletColor}`} />
+                      <span>
+                        <strong className="font-bold">{group.days}:</strong> {group.schedule}
+                      </span>
+                    </div>
+                  </React.Fragment>
+                );
+              })}
             </div>
           </motion.div>
 
@@ -1031,14 +1077,22 @@ export const CustomerView: React.FC = () => {
                       onKeyDown={(e) => e.preventDefault()}
                       className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all cursor-pointer"
                     />
-                    {getDayOfWeek(bookingDate) === 2 && (
-                      <span className="text-xs text-rose-500 font-bold mt-1.5 block">
-                        ⚠️ We're closed on Tuesdays
-                      </span>
-                    )}
+                    {(() => {
+                      const dNum = getDayOfWeek(bookingDate);
+                      const hrs = dataService.getOpeningHours();
+                      const dConfig = hrs[dNum.toString()] || hrs[dNum];
+                      if (dConfig && !dConfig.isOpen) {
+                        return (
+                          <span className="text-xs text-rose-500 font-bold mt-1.5 block">
+                            ⚠️ We're closed on {['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'][dNum]}
+                          </span>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
                   <div>
-                    {getDayOfWeek(bookingDate) === 6 && saturdayMenuType === 'kalyana' ? (
+                    {getDayOfWeek(bookingDate) === 6 && dataService.isKalyanaEnabled() && saturdayMenuType === 'kalyana' ? (
                       <div>
                         <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
                           Time Slot *
@@ -1052,24 +1106,32 @@ export const CustomerView: React.FC = () => {
                         <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
                           Time *
                         </label>
-                        {getDayOfWeek(bookingDate) === 2 ? (
-                          <div className="py-3 px-4 bg-rose-500/10 text-rose-500 text-xs font-bold rounded-xl border border-rose-500/20 text-center">
-                            Closed Tuesdays
-                          </div>
-                        ) : (
-                          <TimeWheelPicker
-                            slots={getAvailableTimeSlots(bookingDate)}
-                            selectedValue={bookingTime}
-                            onChange={setBookingTime}
-                          />
-                        )}
+                        {(() => {
+                          const dNum = getDayOfWeek(bookingDate);
+                          const hrs = dataService.getOpeningHours();
+                          const dConfig = hrs[dNum.toString()] || hrs[dNum];
+                          if (dConfig && !dConfig.isOpen) {
+                            return (
+                              <div className="py-3 px-4 bg-rose-500/10 text-rose-500 text-xs font-bold rounded-xl border border-rose-500/20 text-center">
+                                Closed {['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'][dNum]}
+                              </div>
+                            );
+                          }
+                          return (
+                            <TimeWheelPicker
+                              slots={getAvailableTimeSlots(bookingDate)}
+                              selectedValue={bookingTime}
+                              onChange={setBookingTime}
+                            />
+                          );
+                        })()}
                       </div>
                     )}
                   </div>
                 </div>
 
                 {/* Saturday Menu Selection Question */}
-                {getDayOfWeek(bookingDate) === 6 && (
+                {getDayOfWeek(bookingDate) === 6 && dataService.isKalyanaEnabled() && (
                   <div className="bg-amber-500/10 border border-amber-400/30 rounded-2xl p-4 space-y-3">
                     <label className="block text-xs font-bold text-[#8B4513] dark:text-[#D2B48C] uppercase">
                       Saturday Menu Option *
@@ -1082,7 +1144,7 @@ export const CustomerView: React.FC = () => {
                         type="button"
                         onClick={() => {
                           setSaturdayMenuType('kalyana');
-                          setKalyanaSlot('Slot 1: 11:00am-12:30pm');
+                          setKalyanaSlot(dataService.getKalyanaSlots()[0]?.range || 'Slot 1: 11:00am-12:30pm');
                         }}
                         className={`py-2.5 px-3 rounded-xl font-bold text-xs border transition-all ${
                           saturdayMenuType === 'kalyana'
@@ -1114,9 +1176,10 @@ export const CustomerView: React.FC = () => {
                           Choose your Seating Slot:
                         </span>
                         <div className="space-y-2">
-                          {['Slot 1: 11:00am-12:30pm', 'Slot 2: 12:30pm-2:00pm', 'Slot 3: 2:00pm-3:30pm'].map((slot) => {
+                          {dataService.getKalyanaSlots().map((slotObj) => {
+                            const slot = slotObj.range;
                             const guestsInSlot = getSlotGuestsCount(slot);
-                            const capacity = dataService.getKalyanaCapacity();
+                            const capacity = slotObj.capacity;
                             const available = capacity - guestsInSlot;
                             const totalGuests = adultsCount + childrenCount;
                             const isFull = available <= 0;

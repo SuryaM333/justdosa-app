@@ -40,7 +40,7 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
   const [bookingTime, setBookingTime] = useState('18:30');
   const [isWaitlist, setIsWaitlist] = useState(false);
   const [saturdayMenuType, setSaturdayMenuType] = useState<'regular' | 'kalyana' | 'null'>('null');
-  const [kalyanaSlot, setKalyanaSlot] = useState('Slot 1: 11:00am-12:30pm');
+  const [kalyanaSlot, setKalyanaSlot] = useState(() => dataService.getKalyanaSlots()[0]?.range || 'Slot 1: 11:00am-12:30pm');
   const [whatsappOptIn, setWhatsappOptIn] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -62,7 +62,7 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
       setBookingTime('18:30');
       setIsWaitlist(false);
       setSaturdayMenuType('null');
-      setKalyanaSlot('Slot 1: 11:00am-12:30pm');
+      setKalyanaSlot(dataService.getKalyanaSlots()[0]?.range || 'Slot 1: 11:00am-12:30pm');
       setWhatsappOptIn(true);
       setErrorMsg('');
       setIsSubmitting(false);
@@ -480,7 +480,7 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
                         type="button"
                         onClick={() => {
                           setSaturdayMenuType('kalyana');
-                          setKalyanaSlot('Slot 1: 11:00am-12:30pm');
+                          setKalyanaSlot(dataService.getKalyanaSlots()[0]?.range || 'Slot 1: 11:00am-12:30pm');
                         }}
                         className={`py-2 px-3 rounded-xl font-bold text-xs border transition-all ${
                           saturdayMenuType === 'kalyana'
@@ -512,9 +512,10 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
                           Choose Seating Slot:
                         </span>
                         <div className="space-y-2">
-                          {['Slot 1: 11:00am-12:30pm', 'Slot 2: 12:30pm-2:00pm', 'Slot 3: 2:00pm-3:30pm'].map((slot) => {
+                          {dataService.getKalyanaSlots().map((slotObj) => {
+                            const slot = slotObj.range;
                             const guestsInSlot = getSlotGuestsCount(slot);
-                            const capacity = dataService.getKalyanaCapacity();
+                            const capacity = slotObj.capacity;
                             const available = capacity - guestsInSlot;
                             const totalGuests = adultsCount + childrenCount;
                             const isFull = available <= 0;

@@ -17,56 +17,57 @@ export const getDayOfWeek = (dateStr: string) => {
 
 export const getAvailableTimeSlotsShared = (dateStr: string): TimeSlot[] => {
   const day = getDayOfWeek(dateStr);
-  if (day === 2) return []; // Closed Tuesdays
+  if (day === -1) return [];
+
+  const hours = dataService.getOpeningHours();
+  const dayConfig = hours[day.toString()] || hours[day];
+  if (!dayConfig || !dayConfig.isOpen) return [];
 
   const slots: TimeSlot[] = [];
+  const interval = dataService.getSlotInterval();
 
-  // Saturday or Sunday lunch
-  if (day === 6 || day === 0) {
-    const startStr = dataService.getLunchStartTime(); // e.g., "11:00"
-    const endStr = dataService.getLunchEndTime(); // e.g., "15:00"
-    const [startH, startM] = startStr.split(':').map(Number);
-    const [endH, endM] = endStr.split(':').map(Number);
+  const parseTimeToMins = (timeStr: string) => {
+    if (!timeStr) return 0;
+    const [h, m] = timeStr.split(':').map(Number);
+    return h * 60 + m;
+  };
 
-    const startMinutes = startH * 60 + startM;
-    const endLimitMinutes = (endH * 60 + endM) - 60; // 1 hour before close
-
-    for (let m = startMinutes; m <= endLimitMinutes; m += 15) {
-      const h = Math.floor(m / 60);
-      const mins = m % 60;
-      const val = `${h.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
-      const ampm = h >= 12 ? 'PM' : 'AM';
-      const displayHour = h > 12 ? h - 12 : (h === 0 ? 12 : h);
-      const timeString = `${displayHour}:${mins.toString().padStart(2, '0')} ${ampm}`;
-      slots.push({
-        value: val,
-        label: `${timeString} (Lunch)`,
-        timeString,
-      });
-    }
-  }
-
-  // Wednesday to Monday dinner
-  const startStr = dataService.getDinnerStartTime(); // e.g., "17:30"
-  const endStr = dataService.getDinnerEndTime(); // e.g., "22:00"
-  const [startH, startM] = startStr.split(':').map(Number);
-  const [endH, endM] = endStr.split(':').map(Number);
-
-  const startMinutes = startH * 60 + startM;
-  const endLimitMinutes = (endH * 60 + endM) - 60; // 1 hour before close
-
-  for (let m = startMinutes; m <= endLimitMinutes; m += 15) {
-    const h = Math.floor(m / 60);
-    const mins = m % 60;
+  const minsToSlot = (totalMins: number, labelSuffix: string): TimeSlot => {
+    const h = Math.floor(totalMins / 60);
+    const mins = totalMins % 60;
     const val = `${h.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
     const ampm = h >= 12 ? 'PM' : 'AM';
     const displayHour = h > 12 ? h - 12 : (h === 0 ? 12 : h);
     const timeString = `${displayHour}:${mins.toString().padStart(2, '0')} ${ampm}`;
-    slots.push({
+    return {
       value: val,
-      label: `${timeString} (Dinner)`,
+      label: `${timeString} ${labelSuffix}`,
       timeString,
-    });
+    };
+  };
+
+  // 1. Lunch Service slots
+  if (dayConfig.lunchOpen && dayConfig.lunchStart && dayConfig.lunchEnd) {
+    const startMins = parseTimeToMins(dayConfig.lunchStart);
+    const endMins = parseTimeToMins(dayConfig.lunchEnd);
+    const buffer = dataService.getLunchBuffer();
+    const endLimitMins = endMins - buffer;
+
+    for (let m = startMins; m <= endLimitMins; m += interval) {
+      slots.push(minsToSlot(m, '(Lunch)'));
+    }
+  }
+
+  // 2. Dinner Service slots
+  if (dayConfig.dinnerOpen && dayConfig.dinnerStart && dayConfig.dinnerEnd) {
+    const startMins = parseTimeToMins(dayConfig.dinnerStart);
+    const endMins = parseTimeToMins(dayConfig.dinnerEnd);
+    const buffer = dataService.getDinnerBuffer();
+    const endLimitMins = endMins - buffer;
+
+    for (let m = startMins; m <= endLimitMins; m += interval) {
+      slots.push(minsToSlot(m, '(Dinner)'));
+    }
   }
 
   // Deduplicate and sort slots chronologically
