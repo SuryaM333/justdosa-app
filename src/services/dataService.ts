@@ -333,6 +333,14 @@ export const dataService = {
     }
   },
 
+  async saveAllSettings(settings: any) {
+    try {
+      await safeSetDoc(doc(db, 'settings', 'global'), settings, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
   getWhatsAppNumber(): string {
     return cachedSettings?.whatsappNumber || '0412345678';
   },
