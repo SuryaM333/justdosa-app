@@ -18,7 +18,7 @@
 
 @layer base {
   body {
-    @apply bg-[#FDFBF7] dark:bg-[#1C1917] text-[#2D2926] dark:text-[#FDFBF7] font-sans selection:bg-[#FFB13B] selection:text-white antialiased;
+    @apply bg-[#1C1917] text-[#FDFBF7] font-sans selection:bg-[#FFB13B] selection:text-white antialiased;
   }
 }
 

@@ -289,11 +289,11 @@ export const CustomerView: React.FC = () => {
     const orderingUrl = allocatedTable?.orderingUrl || (activeBooking.tableId ? `https://justdosa.com.au/order/table-${activeBooking.tableId}` : null);
 
     return (
-      <div className="min-h-[calc(100vh-4rem)] bg-[#FDFBF7] dark:bg-[#1C1917] py-8 px-4 flex flex-col items-center justify-center">
+      <div className="min-h-[calc(100vh-4rem)] bg-[#1C1917] py-8 px-4 flex flex-col items-center justify-center">
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="w-full max-w-md bg-white dark:bg-[#26221E] rounded-3xl p-6 sm:p-8 shadow-xl border border-[#E8E2D2] dark:border-[#3D352E] text-center relative overflow-hidden"
+          className="w-full max-w-md bg-[#26221E] rounded-3xl p-6 sm:p-8 shadow-xl border border-[#3D352E] text-center relative overflow-hidden"
         >
           {/* Top accent line */}
           <div className={`absolute top-0 left-0 right-0 h-2 ${isFinished ? 'bg-[#E37A08]' : isReady ? 'bg-[#22C55E]' : 'bg-[#E37A08]'}`} />
@@ -429,11 +429,11 @@ export const CustomerView: React.FC = () => {
     const isAltProposed = activeBooking.status === 'alternative_proposed';
 
     return (
-      <div className="min-h-[calc(100vh-4rem)] bg-[#FDFBF7] dark:bg-[#1C1917] py-8 px-4 flex flex-col items-center justify-center">
+      <div className="min-h-[calc(100vh-4rem)] bg-[#1C1917] py-8 px-4 flex flex-col items-center justify-center">
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="w-full max-w-md bg-white dark:bg-[#26221E] rounded-3xl p-6 sm:p-8 shadow-xl border border-[#E8E2D2] dark:border-[#3D352E] text-center relative overflow-hidden"
+          className="w-full max-w-md bg-[#26221E] rounded-3xl p-6 sm:p-8 shadow-xl border border-[#3D352E] text-center relative overflow-hidden"
         >
           <div className={`absolute top-0 left-0 right-0 h-2 ${isCancelled ? 'bg-[#EF4444]' : isPending ? 'bg-[#F59E0B]' : isDeclined ? 'bg-rose-500' : isAltProposed ? 'bg-amber-400 animate-pulse' : 'bg-[#22C55E]'}`} />
 
@@ -656,7 +656,7 @@ export const CustomerView: React.FC = () => {
 
   // Render main form / selection
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-[#FAF8F2] dark:bg-[#12100E] bg-linear-to-b from-[#FAF8F2] via-[#FDFBF7] to-[#EAE6D8] dark:from-[#1C1917] dark:to-[#12100E] py-8 px-4 sm:px-6 relative overflow-hidden">
+    <div className="min-h-[calc(100vh-4rem)] bg-[#12100E] bg-linear-to-b from-[#1C1917] via-[#151210] to-[#12100E] py-8 px-4 sm:px-6 relative overflow-hidden">
       {/* Subtle banana leaf background glow accent */}
       <div className="absolute top-0 right-0 w-64 h-64 bg-[#22C55E]/5 dark:bg-[#22C55E]/2 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-0 left-0 w-80 h-80 bg-[#E37A08]/5 dark:bg-[#E37A08]/2 rounded-full blur-3xl pointer-events-none" />

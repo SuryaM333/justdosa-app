@@ -394,6 +394,19 @@ export const PINModal: React.FC<PINModalProps> = ({
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Subtle switch to customer view at the bottom of lock screen */}
+        {step !== 'intro' && (
+          <button
+            onClick={() => {
+              localStorage.removeItem('just_dosa_admin_device');
+              onClose();
+            }}
+            className="mt-6 text-xs text-white/50 hover:text-white hover:underline transition-colors duration-200 cursor-pointer underline underline-offset-4"
+          >
+            Switch to customer view
+          </button>
+        )}
       </div>
     </div>
   );

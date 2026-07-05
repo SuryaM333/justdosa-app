@@ -8,7 +8,15 @@ import { Booking, AdminRole } from './types';
 
 export default function App() {
   const [pathname, setPathname] = useState(() => window.location.pathname);
-  const [hash, setHash] = useState(() => window.location.hash);
+  const [hash, setHash] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const isModeAdmin = params.get('mode') === 'admin';
+    const isAdminDevice = localStorage.getItem('just_dosa_admin_device') === 'true';
+    if (isModeAdmin || isAdminDevice) {
+      return '#/admin';
+    }
+    return window.location.hash;
+  });
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() => {
     const auth = sessionStorage.getItem('just_dosa_admin_auth') === 'true';
     const authTime = sessionStorage.getItem('just_dosa_admin_auth_time');
@@ -35,19 +43,13 @@ export default function App() {
     }
     return null;
   });
-  const [isDarkMode, setIsDarkMode] = useState(() => {
-    return localStorage.getItem('just_dosa_dark_mode') === 'true';
-  });
+  const isDarkMode = true;
   const [unreadCount, setUnreadCount] = useState(0);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
 
   useEffect(() => {
     // Set dark mode class on html/body
-    if (isDarkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    document.documentElement.classList.add('dark');
 
     const updateUnread = () => {
       const bookings: Booking[] = dataService.getBookings();
@@ -110,16 +112,17 @@ export default function App() {
     }
   }, [isAdminAuthenticated]);
 
-  const handleToggleDarkMode = () => {
-    const nextMode = !isDarkMode;
-    setIsDarkMode(nextMode);
-    localStorage.setItem('just_dosa_dark_mode', nextMode.toString());
-    if (nextMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const isModeAdmin = params.get('mode') === 'admin';
+    const isAdminDevice = localStorage.getItem('just_dosa_admin_device') === 'true';
+    if (isModeAdmin || isAdminDevice) {
+      if (window.location.hash !== '#/admin') {
+        window.history.replaceState({}, '', '#/admin');
+        setHash('#/admin');
+      }
     }
-  };
+  }, []);
 
   const isAdminRoute = pathname === '/admin' || pathname.startsWith('/admin') || hash === '#/admin' || hash === '#admin' || hash.startsWith('#/admin/') || hash.startsWith('#admin/');
   const isPinModalOpen = isAdminRoute && !isAdminAuthenticated;
@@ -128,6 +131,7 @@ export default function App() {
     sessionStorage.setItem('just_dosa_admin_auth', 'true');
     sessionStorage.setItem('just_dosa_admin_role', role);
     sessionStorage.setItem('just_dosa_admin_auth_time', Date.now().toString());
+    localStorage.setItem('just_dosa_admin_device', 'true');
     setIsAdminAuthenticated(true);
     setAdminRole(role);
   };
@@ -164,16 +168,12 @@ export default function App() {
   };
 
   return (
-    <div className={`min-h-screen font-sans antialiased transition-colors duration-200 ${
-      isDarkMode ? 'dark bg-[#1C1917] text-[#FDFBF7]' : 'bg-[#FDFBF7] text-[#2D2926]'
-    }`}>
+    <div className="min-h-screen font-sans antialiased bg-[#1C1917] text-[#FDFBF7]">
       {/* Top Navbar */}
       <Navbar
         isAdminRoute={isAdminRoute}
         onNavigateHome={handleNavigateHome}
         onExitAdmin={handleExitAdmin}
-        isDarkMode={isDarkMode}
-        onToggleDarkMode={handleToggleDarkMode}
         unreadCount={unreadCount}
         onResetDemo={handleResetDemo}
       />
