@@ -37,6 +37,7 @@ export const CustomerView: React.FC = () => {
     return localStorage.getItem('just_dosa_active_customer_booking_id') || null;
   });
   const [activeBooking, setActiveBooking] = useState<Booking | null>(null);
+  const [hasRoutedOnLoad, setHasRoutedOnLoad] = useState(false);
   const [queueInfo, setQueueInfo] = useState<{ position: number; totalWaiting: number; estimatedWaitMinutes: number }>({
     position: 0,
     totalWaiting: 0,
@@ -121,14 +122,19 @@ export const CustomerView: React.FC = () => {
       const found = bookings.find((b) => b.id === activeBookingId);
       if (found) {
         setActiveBooking(found);
-        if (found.type === 'walk-in' && (found.status === 'waiting' || found.status === 'seated' || found.status === 'finished')) {
-          setActiveTab('status');
+        if (!hasRoutedOnLoad) {
+          if (found.type === 'walk-in' && (found.status === 'waiting' || found.status === 'seated' || found.status === 'finished')) {
+            setActiveTab('status');
+          } else if (found.type === 'remote' && ['booked', 'pending', 'confirmed', 'declined', 'alternative_proposed', 'cancelled'].includes(found.status)) {
+            setActiveTab('confirmation');
+          }
+          setHasRoutedOnLoad(true);
+        }
+        
+        // Always keep queueInfo up to date
+        if (found.type === 'walk-in') {
           const qInfo = dataService.getWaitingQueuePosition(found.id);
           setQueueInfo(qInfo);
-        } else if (found.type === 'remote' && ['booked', 'pending', 'confirmed', 'declined', 'alternative_proposed'].includes(found.status)) {
-          setActiveTab('confirmation');
-        } else if (found.status === 'cancelled') {
-          setActiveTab('confirmation');
         }
       } else {
         setActiveBooking(null);
@@ -145,7 +151,7 @@ export const CustomerView: React.FC = () => {
       unsubscribe();
       clearInterval(pollInterval);
     };
-  }, [activeBookingId]);
+  }, [activeBookingId, hasRoutedOnLoad]);
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const formatted = formatAusMobile(e.target.value);
@@ -164,14 +170,14 @@ export const CustomerView: React.FC = () => {
     const day = getDayOfWeek(dateStr);
     if (day === 2) return []; // Closed Tuesdays
     
-    const slots: { value: string; label: string }[] = [];
+    const slots: { value: string; label: string; timeString: string }[] = [];
     
-    // Saturday or Sunday lunch
+    // Saturday or Sunday lunch (11:00 AM - 3:00 PM). Last slot is 1 hour before close, i.e., 2:00 PM (14:00)
     if (day === 6 || day === 0) {
       const lunchStart = dataService.getLunchStartTime();
-      const lunchEnd = dataService.getLunchEndTime();
       const [lStartHour, lStartMin] = lunchStart.split(':').map(Number);
-      const [lEndHour, lEndMin] = lunchEnd.split(':').map(Number);
+      const lEndHour = 14; // 1 hour before 15:00
+      const lEndMin = 0;
 
       let hour = lStartHour;
       let min = lStartMin;
@@ -179,7 +185,8 @@ export const CustomerView: React.FC = () => {
         const val = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
         const ampm = hour >= 12 ? 'PM' : 'AM';
         const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
-        slots.push({ value: val, label: `${displayHour}:${min.toString().padStart(2, '0')} ${ampm} (Lunch)` });
+        const timeString = `${displayHour}:${min.toString().padStart(2, '0')} ${ampm}`;
+        slots.push({ value: val, label: `${timeString} (Lunch)`, timeString });
         min += 15;
         if (min === 60) {
           min = 0;
@@ -188,11 +195,11 @@ export const CustomerView: React.FC = () => {
       }
     }
     
-    // Wednesday to Monday dinner
+    // Wednesday to Monday dinner (5:30 PM - 10:00 PM). Last slot is 1 hour before close, i.e., 9:00 PM (21:00)
     const dinnerStart = dataService.getDinnerStartTime();
-    const dinnerEnd = dataService.getDinnerEndTime();
     const [dStartHour, dStartMin] = dinnerStart.split(':').map(Number);
-    const [dEndHour, dEndMin] = dinnerEnd.split(':').map(Number);
+    const dEndHour = 21; // 1 hour before 22:00
+    const dEndMin = 0;
 
     let hour = dStartHour;
     let min = dStartMin;
@@ -200,7 +207,8 @@ export const CustomerView: React.FC = () => {
       const val = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
       const ampm = hour >= 12 ? 'PM' : 'AM';
       const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
-      slots.push({ value: val, label: `${displayHour}:${min.toString().padStart(2, '0')} ${ampm} (Dinner)` });
+      const timeString = `${displayHour}:${min.toString().padStart(2, '0')} ${ampm}`;
+      slots.push({ value: val, label: `${timeString} (Dinner)`, timeString });
       min += 15;
       if (min === 60) {
         min = 0;
@@ -210,6 +218,15 @@ export const CustomerView: React.FC = () => {
     
     return slots;
   };
+
+  useEffect(() => {
+    const slots = getAvailableTimeSlots(bookingDate);
+    if (slots.length > 0) {
+      if (!slots.some((s) => s.value === bookingTime)) {
+        setBookingTime(slots[0].value);
+      }
+    }
+  }, [bookingDate, bookingTime]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -263,6 +280,7 @@ export const CustomerView: React.FC = () => {
     localStorage.setItem('just_dosa_active_customer_booking_id', newBk.id);
     setActiveBookingId(newBk.id);
     setActiveBooking(newBk);
+    setHasRoutedOnLoad(true);
 
     if (newBk.type === 'walk-in') {
       const qInfo = dataService.getWaitingQueuePosition(newBk.id);
@@ -300,6 +318,22 @@ export const CustomerView: React.FC = () => {
     setChildrenHighChairs([]);
     setWhatsappOptIn(false);
     setSaturdayMenuType(null);
+    setHasRoutedOnLoad(false);
+  };
+
+  const handleBackToHome = () => {
+    if (activeBooking && ['finished', 'cancelled', 'declined', 'no-show'].includes(activeBooking.status)) {
+      handleResetSession();
+    } else {
+      setActiveTab('walk-in');
+    }
+  };
+
+  const handleLeaveWaitlist = () => {
+    if (activeBookingId) {
+      dataService.cancelBooking(activeBookingId);
+    }
+    handleResetSession();
   };
 
   // Render Status screen for walk-ins
@@ -330,10 +364,10 @@ export const CustomerView: React.FC = () => {
               <div className="w-20 h-20 bg-amber-500/10 dark:bg-amber-500/20 rounded-full flex items-center justify-center mx-auto mb-4 text-amber-500 border-4 border-amber-500/20">
                 <CheckCircle2 className="w-10 h-10" />
               </div>
-              <h2 className="font-serif text-2xl sm:text-3xl font-bold text-[#2D2926] dark:text-white mb-2 leading-tight">
+              <h2 className="font-serif text-2xl sm:text-3xl font-bold text-white mb-2 leading-tight">
                 Thank you for dining with us, {activeBooking.firstName}!
               </h2>
-              <p className="text-sm text-[#6B5E4C] dark:text-[#B8ACA0] mb-8">
+              <p className="text-sm text-[#B8ACA0] mb-8">
                 We hope you enjoyed your meal. We hope to see you again soon!
               </p>
               
@@ -353,14 +387,14 @@ export const CustomerView: React.FC = () => {
               <div className="w-20 h-20 bg-[#22C55E]/10 dark:bg-[#22C55E]/20 rounded-full flex items-center justify-center mx-auto mb-4 text-[#22C55E] border-4 border-[#22C55E]/20 animate-pulse">
                 <Sparkles className="w-10 h-10" />
               </div>
-              <h2 className="font-serif text-2xl sm:text-3xl font-bold text-[#2D2926] dark:text-white mb-2">
+              <h2 className="font-serif text-2xl sm:text-3xl font-bold text-white mb-2">
                 Welcome to Just Dosa, {activeBooking.firstName}! 🎉
               </h2>
-              <p className="text-sm text-[#6B5E4C] dark:text-[#B8ACA0] mb-6">
+              <p className="text-sm text-[#B8ACA0] mb-6">
                 Your table is ready. Our team is ready to serve you freshly prepared food at your service.
               </p>
-              <div className="my-6 bg-[#F5F2EA] dark:bg-[#1C1917] border-2 border-[#E8E2D2] dark:border-[#3D352E] rounded-2xl p-6">
-                <p className="text-xs uppercase tracking-wider text-[#8B4513] dark:text-[#D2B48C] font-bold mb-1">
+              <div className="my-6 bg-[#1C1917] border-2 border-[#3D352E] rounded-2xl p-6">
+                <p className="text-xs uppercase tracking-wider text-[#D2B48C] font-bold mb-1">
                   Please proceed to
                 </p>
                 <div className="text-4xl sm:text-5xl font-black text-[#22C55E] font-mono mb-4">
@@ -368,17 +402,23 @@ export const CustomerView: React.FC = () => {
                 </div>
 
                 {orderingUrl && (
-                  <div className="mt-4 pt-4 border-t border-[#E8E2D2] dark:border-[#3D352E] text-left">
-                    <a
-                      href={orderingUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="w-full py-3 px-4 rounded-xl bg-[#E37A08] hover:bg-[#c96906] text-white font-bold text-sm shadow-md flex items-center justify-center gap-2 transition-all block mb-3 text-center"
-                    >
-                      <Utensils className="w-4 h-4" />
-                      <span>View Menu & Order Now</span>
-                    </a>
-                    <div className="flex items-start gap-2 text-[11px] text-[#6B5E4C] dark:text-[#B8ACA0] italic bg-white dark:bg-[#26221E] p-2.5 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E]">
+                  <div className="mt-4 pt-4 border-t border-[#3D352E] text-left">
+                    {(activeBooking.tableId?.toString() === '6' || activeBooking.tableId?.toString() === '7' || !orderingUrl || orderingUrl.includes('table-6') || orderingUrl.includes('table-7')) ? (
+                      <div className="text-xs font-semibold text-[#D2B48C] text-center bg-[#26221E] border border-[#3D352E] p-3.5 rounded-xl mb-3 leading-relaxed">
+                        Please ask our staff for the menu — we'll take your order at the table.
+                      </div>
+                    ) : (
+                      <a
+                        href={orderingUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full py-3 px-4 rounded-xl bg-[#E37A08] hover:bg-[#c96906] text-white font-bold text-sm shadow-md flex items-center justify-center gap-2 transition-all block mb-3 text-center"
+                      >
+                        <Utensils className="w-4 h-4" />
+                        <span>View Menu & Order Now</span>
+                      </a>
+                    )}
+                    <div className="flex items-start gap-2 text-[11px] text-[#B8ACA0] italic bg-[#26221E] p-2.5 rounded-xl border border-[#3D352E]">
                       <QrCode className="w-4 h-4 shrink-0 text-[#E37A08] mt-0.5" />
                       <span>Note: You can also order directly at your table by scanning the physical QR code display stand.</span>
                     </div>
@@ -388,29 +428,29 @@ export const CustomerView: React.FC = () => {
             </motion.div>
           ) : (
             <div>
-              <div className="w-16 h-16 bg-[#F5F2EA] dark:bg-[#1C1917] rounded-2xl flex items-center justify-center mx-auto mb-4 text-[#E37A08] border border-[#E8E2D2] dark:border-[#3D352E]">
+              <div className="w-16 h-16 bg-[#1C1917] rounded-2xl flex items-center justify-center mx-auto mb-4 text-[#E37A08] border border-[#3D352E]">
                 <Clock className="w-8 h-8 animate-spin" style={{ animationDuration: '8s' }} />
               </div>
-              <h2 className="font-serif text-xl sm:text-2xl font-bold text-[#2D2926] dark:text-white mb-1">
+              <h2 className="font-serif text-xl sm:text-2xl font-bold text-white mb-1">
                 Waiting for Allocation
               </h2>
-              <p className="text-xs text-[#A1917B] dark:text-[#9C8D7C] mb-6">
+              <p className="text-xs text-[#B8ACA0] mb-6">
                 Hi {activeBooking.firstName}, you are on the live waitlist for {formatPartyBreakdown(activeBooking)}.
               </p>
 
               {/* Queue Position & Allocation Info */}
               <div className="grid grid-cols-1 gap-4 mb-6">
-                <div className="bg-[#F5F2EA] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] rounded-3xl p-5 text-center shadow-xs">
-                  <span className="text-xs uppercase font-bold text-[#8B4513] dark:text-[#D2B48C] block mb-2 tracking-widest">
+                <div className="bg-[#1C1917] border border-[#3D352E] rounded-3xl p-5 text-center shadow-xs">
+                  <span className="text-xs uppercase font-bold text-[#D2B48C] block mb-2 tracking-widest">
                     Queue Position
                   </span>
                   <div className="text-5xl font-black text-[#E37A08] font-mono tracking-tight mb-2">
                     #{queueInfo.position}
                   </div>
-                  <span className="text-xs font-semibold text-[#A1917B] dark:text-[#9C8D7C] block mb-3">
+                  <span className="text-xs font-semibold text-[#B8ACA0] block mb-3">
                     of {queueInfo.totalWaiting} parties waiting
                   </span>
-                  <div className="pt-3 border-t border-[#E8E2D2]/60 dark:border-[#3D352E]/60 text-xs sm:text-sm font-semibold text-[#8B4513] dark:text-[#D2B48C] flex items-center justify-center gap-2">
+                  <div className="pt-3 border-t border-[#3D352E]/60 text-xs sm:text-sm font-semibold text-[#D2B48C] flex items-center justify-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-[#E37A08] animate-pulse shrink-0" />
                     <span>Please wait — our team will allocate your table shortly.</span>
                   </div>
@@ -420,8 +460,8 @@ export const CustomerView: React.FC = () => {
               {/* Premium Signature Dish Showcase slider */}
               <SignatureDishShowcase />
 
-              <div className="bg-[#FDFBF7] dark:bg-[#1C1917] rounded-xl p-3 text-left text-xs text-[#6B5E4C] dark:text-[#B8ACA0] mb-6 border border-[#E8E2D2] dark:border-[#3D352E]">
-                <div className="flex items-center gap-2 mb-1 text-[#2D2926] dark:text-[#FDFBF7] font-semibold">
+              <div className="bg-[#1C1917] rounded-xl p-3 text-left text-xs text-[#B8ACA0] mb-6 border border-[#3D352E]">
+                <div className="flex items-center gap-2 mb-1 text-white font-semibold">
                   <span className="w-2 h-2 rounded-full bg-[#E37A08] animate-ping" />
                   Live Auto-Updating Screen
                 </div>
@@ -431,12 +471,20 @@ export const CustomerView: React.FC = () => {
           )}
 
           {!isFinished && (
-            <button
-              onClick={handleResetSession}
-              className="w-full py-3 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] hover:bg-[#E8E2D2] dark:hover:bg-[#3D352E] text-[#6B5E4C] dark:text-[#B8ACA0] font-medium text-sm transition-colors border border-[#E8E2D2] dark:border-[#3D352E]"
-            >
-              {isReady ? 'Done / Make Another Booking' : 'Leave Waitlist / New Booking'}
-            </button>
+            <div className="space-y-3">
+              <button
+                onClick={handleBackToHome}
+                className="w-full py-3 rounded-xl bg-[#1C1917] hover:bg-[#3D352E] text-[#B8ACA0] font-bold text-sm transition-colors border border-[#3D352E]"
+              >
+                Back to Home
+              </button>
+              <button
+                onClick={isReady ? handleResetSession : handleLeaveWaitlist}
+                className="w-full py-2.5 rounded-xl bg-transparent hover:bg-rose-500/10 text-rose-500 font-bold text-xs transition-colors border border-rose-500/20"
+              >
+                {isReady ? 'Done / Make Another Booking' : 'Leave Waitlist / Cancel'}
+              </button>
+            </div>
           )}
         </motion.div>
       </div>
@@ -465,10 +513,10 @@ export const CustomerView: React.FC = () => {
               <div className="w-16 h-16 bg-[#EF4444]/10 rounded-2xl flex items-center justify-center mx-auto mb-4 text-[#EF4444] border border-[#EF4444]/20">
                 <XCircle className="w-8 h-8" />
               </div>
-              <h2 className="font-serif text-xl sm:text-2xl font-bold text-[#2D2926] dark:text-white mb-2">
+              <h2 className="font-serif text-xl sm:text-2xl font-bold text-white mb-2">
                 Booking Cancelled
               </h2>
-              <p className="text-sm text-[#6B5E4C] dark:text-[#B8ACA0] mb-6">
+              <p className="text-sm text-[#B8ACA0] mb-6">
                 Your reservation for {formatPartyBreakdown(activeBooking)} has been cancelled. We hope to see you another time!
               </p>
             </div>
@@ -486,13 +534,13 @@ export const CustomerView: React.FC = () => {
                 {isConfirmed && <CheckCircle2 className="w-8 h-8" />}
               </div>
 
-              <h2 className="font-serif text-xl sm:text-2xl font-bold text-[#2D2926] dark:text-white mb-1">
+              <h2 className="font-serif text-xl sm:text-2xl font-bold text-white mb-1">
                 {isPending && "Booking requested — we'll confirm shortly"}
                 {isConfirmed && "Booking Confirmed!"}
                 {isDeclined && "Reservation Declined"}
                 {isAltProposed && "Alternative Time Proposed"}
               </h2>
-              <p className="text-xs text-[#A1917B] dark:text-[#9C8D7C] mb-6">
+              <p className="text-xs text-[#B8ACA0] mb-6">
                 {isPending && "We have received your reservation request. Our team is reviewing and will confirm soon."}
                 {isConfirmed && "We have confirmed and saved your table reservation at Just Dosa Melbourne."}
                 {isDeclined && "We couldn't accommodate the exact time requested. Please check alternative times or contact us."}
@@ -501,39 +549,39 @@ export const CustomerView: React.FC = () => {
 
               {/* Alternative proposal details call-out */}
               {isAltProposed && (
-                <div className="bg-amber-500/10 border border-amber-400 rounded-2xl p-5 text-left space-y-3 mb-6">
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-5 text-left space-y-3 mb-6">
                   <div className="flex items-start gap-2.5">
                     <span className="text-lg">🔔</span>
                     <div>
-                      <h4 className="font-bold text-xs text-[#8B4513] dark:text-[#D2B48C] uppercase tracking-wider">
+                      <h4 className="font-bold text-xs text-[#D2B48C] uppercase tracking-wider">
                         Suggested Offer
                       </h4>
-                      <p className="text-[11px] text-[#6B5E4C] dark:text-[#B8ACA0] mt-0.5">
+                      <p className="text-[11px] text-[#B8ACA0] mt-0.5">
                         Please review our team's proposed alternative:
                       </p>
                     </div>
                   </div>
                   
-                  <div className="bg-white dark:bg-[#1C1917] p-3.5 rounded-xl border border-amber-500/20 text-center">
-                    <div className="text-xs font-bold text-[#2D2926] dark:text-white">
+                  <div className="bg-[#1C1917] p-3.5 rounded-xl border border-amber-500/20 text-center">
+                    <div className="text-xs font-bold text-white">
                       {activeBooking.alternativeDate}
                     </div>
                     <div className="text-lg font-black text-[#E37A08] font-mono mt-0.5">
                       {activeBooking.alternativeIsKalyana ? activeBooking.alternativeKalyanaSlot : activeBooking.alternativeTime}
                     </div>
                     {activeBooking.alternativeIsKalyana && (
-                      <span className="inline-block mt-1 bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded text-[9px] font-bold">
+                      <span className="inline-block mt-1 bg-amber-500/15 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded text-[9px] font-bold">
                         Kalyana Virundhu Special Feast
                       </span>
                     )}
                   </div>
 
                   {activeBooking.proposalNote && (
-                    <div className="bg-white/80 dark:bg-[#1C1917]/70 p-3.5 rounded-xl border border-amber-500/30 text-xs text-[#6B5E4C] dark:text-[#B8ACA0] shadow-sm">
-                      <span className="font-bold text-[#8B4513] dark:text-[#D2B48C] block mb-1">
+                    <div className="bg-[#1C1917]/70 p-3.5 rounded-xl border border-amber-500/30 text-xs text-[#B8ACA0] shadow-sm">
+                      <span className="font-bold text-[#D2B48C] block mb-1">
                         Note from Just Dosa:
                       </span>
-                      <p className="italic font-medium text-[#2D2926] dark:text-[#FDFBF7]">
+                      <p className="italic font-medium text-white">
                         "{activeBooking.proposalNote}"
                       </p>
                     </div>
@@ -557,37 +605,37 @@ export const CustomerView: React.FC = () => {
               )}
 
               {/* Booking details card */}
-              <div className="bg-[#F5F2EA] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] rounded-2xl p-5 text-left mb-6 space-y-3">
+              <div className="bg-[#1C1917] border border-[#3D352E] rounded-2xl p-5 text-left mb-6 space-y-3">
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Status</span>
+                  <span className="text-[#B8ACA0]">Status</span>
                   <span className={`font-extrabold uppercase text-xs px-2 py-0.5 rounded ${
-                    isPending ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400' :
-                    isDeclined ? 'bg-rose-500/20 text-rose-600 dark:text-rose-400' :
-                    isAltProposed ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400 animate-pulse' :
-                    'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
+                    isPending ? 'bg-amber-500/20 text-amber-400' :
+                    isDeclined ? 'bg-rose-500/20 text-rose-400' :
+                    isAltProposed ? 'bg-amber-500/20 text-amber-400 animate-pulse' :
+                    'bg-emerald-500/20 text-emerald-400'
                   }`}>{activeBooking.status.replace('_', ' ')}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Name</span>
-                  <span className="font-semibold text-[#2D2926] dark:text-white">{activeBooking.firstName} {activeBooking.lastName}</span>
+                  <span className="text-[#B8ACA0]">Name</span>
+                  <span className="font-semibold text-white">{activeBooking.firstName} {activeBooking.lastName}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Date</span>
-                  <span className="font-semibold text-[#8B4513] dark:text-[#D2B48C]">{activeBooking.bookingDate}</span>
+                  <span className="text-[#B8ACA0]">Date</span>
+                  <span className="font-semibold text-[#D2B48C]">{activeBooking.bookingDate}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Time</span>
-                  <span className="font-semibold text-[#8B4513] dark:text-[#D2B48C]">{activeBooking.bookingTime}</span>
+                  <span className="text-[#B8ACA0]">Time</span>
+                  <span className="font-semibold text-[#D2B48C]">{activeBooking.bookingTime}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Menu Type</span>
-                  <span className={`font-bold text-xs ${activeBooking.isKalyanaVirundhu ? 'text-[#E37A08]' : 'text-blue-600 dark:text-blue-400'}`}>
+                  <span className="text-[#B8ACA0]">Menu Type</span>
+                  <span className={`font-bold text-xs ${activeBooking.isKalyanaVirundhu ? 'text-[#E37A08]' : 'text-blue-400'}`}>
                     {activeBooking.isKalyanaVirundhu ? `Kalyana Virundhu (${activeBooking.kalyanaSlot?.split(':')[0]})` : 'Regular Menu'}
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Party Size</span>
-                  <span className="font-semibold text-[#2D2926] dark:text-white flex items-center gap-1.5">
+                  <span className="text-[#B8ACA0]">Party Size</span>
+                  <span className="font-semibold text-white flex items-center gap-1.5">
                     <span>{formatPartyBreakdown(activeBooking)}</span>
                     {((activeBooking.childrenHighChairs?.filter(Boolean).length ?? activeBooking.childSeats) > 0) && (
                       <span className="inline-flex items-center gap-0.5 bg-[#E37A08]/10 text-[#E37A08] px-1.5 py-0.5 rounded text-xs font-bold border border-[#E37A08]/30">
@@ -600,7 +648,7 @@ export const CustomerView: React.FC = () => {
               </div>
 
               {activeBooking.changeRequestedNote && (
-                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-700 dark:text-amber-300 text-left mb-6">
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-xs text-amber-300 text-left mb-6">
                   <strong className="block font-bold">Change Requested:</strong>
                   <p className="italic mt-0.5">"{activeBooking.changeRequestedNote}"</p>
                   <span className="text-[10px] opacity-80 block mt-1">Our staff is reviewing your request.</span>
@@ -619,15 +667,15 @@ export const CustomerView: React.FC = () => {
                 {!activeBooking.changeRequestedNote && !showChangeForm && (
                   <button
                     onClick={() => setShowChangeForm(true)}
-                    className="w-full py-2.5 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] hover:bg-[#E8E2D2] dark:hover:bg-[#3D352E] text-[#8B4513] dark:text-[#D2B48C] font-bold text-xs border border-[#E8E2D2] dark:border-[#3D352E] transition-colors"
+                    className="w-full py-2.5 rounded-xl bg-[#1C1917] hover:bg-[#3D352E] text-[#D2B48C] font-bold text-xs border border-[#3D352E] transition-colors"
                   >
                     Request a change (Date, Time or Size)
                   </button>
                 )}
 
                 {showChangeForm && (
-                  <form onSubmit={handleRequestChangeSubmit} className="bg-[#F5F2EA] dark:bg-[#1C1917] p-3 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] text-left space-y-2">
-                    <label className="block text-[11px] font-bold text-[#8B4513] dark:text-[#D2B48C]">
+                  <form onSubmit={handleRequestChangeSubmit} className="bg-[#1C1917] p-3 rounded-xl border border-[#3D352E] text-left space-y-2">
+                    <label className="block text-[11px] font-bold text-[#D2B48C]">
                       What would you like to change?
                     </label>
                     <input
@@ -636,19 +684,19 @@ export const CustomerView: React.FC = () => {
                       placeholder="e.g. Can we change to 7:00 PM or add 1 adult?"
                       value={changeNote}
                       onChange={(e) => setChangeNote(e.target.value)}
-                      className="w-full px-3 py-2 rounded-lg bg-white dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] text-xs text-[#2D2926] dark:text-white"
+                      className="w-full px-3 py-2 rounded-lg bg-[#26221E] border border-[#3D352E] text-xs text-white"
                     />
                     <div className="flex gap-2 pt-1">
                       <button
                         type="submit"
-                        className="flex-1 py-1.5 bg-[#8B4513] text-white rounded-lg text-xs font-bold"
+                        className="flex-1 py-1.5 bg-[#E37A08] text-white rounded-lg text-xs font-bold hover:bg-[#c96906] transition-colors"
                       >
                         Submit Request
                       </button>
                       <button
                         type="button"
                         onClick={() => setShowChangeForm(false)}
-                        className="px-3 py-1.5 bg-white dark:bg-[#26221E] text-[#6B5E4C] rounded-lg text-xs font-bold border border-[#E8E2D2]"
+                        className="px-3 py-1.5 bg-[#26221E] text-[#B8ACA0] rounded-lg text-xs font-bold border border-[#3D352E]"
                       >
                         Cancel
                       </button>
@@ -658,7 +706,7 @@ export const CustomerView: React.FC = () => {
 
                 <button
                   onClick={handleCancelBooking}
-                  className="text-xs text-[#EF4444] hover:underline font-medium block mx-auto"
+                  className="text-xs text-rose-500 hover:underline font-semibold block mx-auto transition-all"
                 >
                   Cancel my booking
                 </button>
@@ -667,8 +715,8 @@ export const CustomerView: React.FC = () => {
           )}
 
           <button
-            onClick={handleResetSession}
-            className="w-full py-3 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] hover:bg-[#E8E2D2] dark:hover:bg-[#3D352E] text-[#6B5E4C] dark:text-[#B8ACA0] font-medium text-sm transition-colors border border-[#E8E2D2] dark:border-[#3D352E]"
+            onClick={handleBackToHome}
+            className="w-full py-3 rounded-xl bg-[#1C1917] hover:bg-[#3D352E] text-[#B8ACA0] font-bold text-sm transition-colors border border-[#3D352E]"
           >
             Back to Home
           </button>
@@ -752,6 +800,41 @@ export const CustomerView: React.FC = () => {
           animate="visible"
           className="max-w-xl mx-auto relative z-10"
         >
+          {/* Active Booking Top Banner */}
+          {activeBookingId && activeBooking && !['finished', 'cancelled', 'declined', 'no-show'].includes(activeBooking.status) && (
+            <motion.div
+              variants={itemVariants}
+              className="mb-6 p-4 rounded-2xl bg-[#E37A08]/10 dark:bg-[#E37A08]/15 border border-[#E37A08]/40 flex items-center justify-between text-xs relative z-20 shadow-xs"
+            >
+              <div className="flex items-center gap-3">
+                <span className="relative flex h-2.5 w-2.5 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#E37A08] opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#E37A08]"></span>
+                </span>
+                <div className="text-left">
+                  <span className="font-bold text-[#E37A08] dark:text-[#D2B48C] block text-sm mb-0.5">
+                    You have an active booking!
+                  </span>
+                  <span className="text-[#6B5E4C] dark:text-[#B8ACA0] font-medium">
+                    {activeBooking.firstName} ({formatPartyBreakdown(activeBooking)}) • <span className="uppercase font-bold text-amber-600 dark:text-amber-400">{activeBooking.status.replace('_', ' ')}</span>
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  if (activeBooking.type === 'walk-in') {
+                    setActiveTab('status');
+                  } else {
+                    setActiveTab('confirmation');
+                  }
+                }}
+                className="px-4 py-2 rounded-xl bg-[#E37A08] text-white font-bold hover:bg-[#C96905] shadow-xs cursor-pointer select-none transition-all whitespace-nowrap"
+              >
+                View Status
+              </button>
+            </motion.div>
+          )}
+
           {/* Welcome Header */}
           <motion.div variants={itemVariants} className="text-center mb-8">
             <div className="w-56 h-56 mx-auto mb-2 flex items-center justify-center bg-transparent shrink-0">
@@ -940,7 +1023,8 @@ export const CustomerView: React.FC = () => {
                       min={new Date().toISOString().split('T')[0]}
                       value={bookingDate}
                       onChange={(e) => setBookingDate(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
+                      onKeyDown={(e) => e.preventDefault()}
+                      className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all cursor-pointer"
                     />
                     {getDayOfWeek(bookingDate) === 2 && (
                       <span className="text-xs text-rose-500 font-bold mt-1.5 block">
@@ -963,18 +1047,31 @@ export const CustomerView: React.FC = () => {
                         <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
                           Time *
                         </label>
-                        <select
-                          value={bookingTime}
-                          onChange={(e) => setBookingTime(e.target.value)}
-                          disabled={getDayOfWeek(bookingDate) === 2}
-                          className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all disabled:opacity-50"
-                        >
-                          {getAvailableTimeSlots(bookingDate).map((slot) => (
-                            <option key={slot.value} value={slot.value}>
-                              {slot.label}
-                            </option>
-                          ))}
-                        </select>
+                        {getDayOfWeek(bookingDate) === 2 ? (
+                          <div className="py-3 px-4 bg-rose-500/10 text-rose-500 text-xs font-bold rounded-xl border border-rose-500/20 text-center">
+                            Closed Tuesdays
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-36 overflow-y-auto p-1.5 bg-[#F5F2EA]/40 dark:bg-[#1C1917]/40 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E]">
+                            {getAvailableTimeSlots(bookingDate).map((slot) => {
+                              const isSelected = bookingTime === slot.value;
+                              return (
+                                <button
+                                  key={slot.value}
+                                  type="button"
+                                  onClick={() => setBookingTime(slot.value)}
+                                  className={`py-1.5 px-2 text-[11px] font-bold rounded-lg border transition-all text-center ${
+                                    isSelected
+                                      ? 'bg-[#E37A08] border-transparent text-white shadow-sm'
+                                      : 'bg-white dark:bg-[#26221E] text-[#6B5E4C] dark:text-[#B8ACA0] border-[#E8E2D2] dark:border-[#3D352E] hover:border-[#E37A08]/50'
+                                  }`}
+                                >
+                                  {slot.timeString}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1222,24 +1319,6 @@ export const CustomerView: React.FC = () => {
           </form>
         </motion.div>
       </motion.div>
-
-      {/* Existing Active Booking Shortcut if available */}
-      {activeBookingId && activeBooking && (
-        <motion.div variants={itemVariants} className="mt-6 p-4 rounded-2xl bg-[#F5F2EA] dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] flex items-center justify-between text-xs relative z-20">
-          <div>
-            <span className="font-bold text-[#8B4513] dark:text-[#D2B48C] block">You have an active session!</span>
-            <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">
-              {activeBooking.firstName} ({formatPartyBreakdown(activeBooking)}) — {activeBooking.status.toUpperCase()}
-            </span>
-          </div>
-          <button
-            onClick={() => setActiveTab(activeBooking.status === 'booked' || activeBooking.status === 'cancelled' || activeBooking.status === 'alternative_proposed' ? 'confirmation' : 'status')}
-            className="px-3 py-1.5 rounded-lg bg-[#E37A08] text-white font-bold hover:bg-[#C96905] shadow-sm"
-          >
-            View Status →
-          </button>
-        </motion.div>
-      )}
     </motion.div>
   </div>
 </>

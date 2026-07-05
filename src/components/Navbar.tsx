@@ -55,14 +55,15 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {/* Reset Database Button (Subtle tool to clear live data) */}
-          <button
-            onClick={onResetDemo}
-            title="Clear and Reset Database"
-            className="p-2 rounded-xl text-[#B8ACA0] dark:text-[#B8ACA0] hover:text-[#D2B48C] hover:bg-[#26221E] transition-colors border border-transparent hover:border-[#3D352E]"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
+          {isAdminRoute && (
+            <button
+              onClick={onResetDemo}
+              title="Clear and Reset Database"
+              className="p-2 rounded-xl text-[#B8ACA0] dark:text-[#B8ACA0] hover:text-[#D2B48C] hover:bg-[#26221E] transition-colors border border-transparent hover:border-[#3D352E]"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
     </header>
