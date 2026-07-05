@@ -35,17 +35,35 @@ export const PINModal: React.FC<PINModalProps> = ({
   const [error, setError] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [step, setStep] = useState<'intro' | 'lock' | 'pin'>('intro');
+  const [logoTaps, setLogoTaps] = useState(0);
 
   const prefersReducedMotion = usePrefersReducedMotion();
 
   const staffPin = dataService.getStaffPin();
   const ownerPin = dataService.getOwnerPin();
 
+  const handleLogoClick = () => {
+    const next = logoTaps + 1;
+    if (next >= 5) {
+      localStorage.removeItem('just_dosa_admin_device_v2');
+      localStorage.removeItem('just_dosa_admin_device');
+      sessionStorage.removeItem('just_dosa_admin_auth');
+      sessionStorage.removeItem('just_dosa_admin_role');
+      sessionStorage.removeItem('just_dosa_admin_auth_time');
+      onClose();
+      window.location.href = window.location.origin + '/';
+      setLogoTaps(0);
+    } else {
+      setLogoTaps(next);
+    }
+  };
+
   useEffect(() => {
     if (isOpen) {
       setPin('');
       setError(false);
       setIsVerifying(false);
+      setLogoTaps(0);
 
       const skipIntro = sessionStorage.getItem('just_dosa_skip_welcome_intro') === 'true';
       if (skipIntro) {
@@ -175,7 +193,8 @@ export const PINModal: React.FC<PINModalProps> = ({
                 <img 
                   src={LOGO_BASE64} 
                   alt="Just Dosa Logo" 
-                  className="w-28 h-28 sm:w-32 sm:h-32 mx-auto drop-shadow-2xl relative" 
+                  onClick={handleLogoClick}
+                  className="w-28 h-28 sm:w-32 sm:h-32 mx-auto drop-shadow-2xl relative cursor-pointer active:scale-95 transition-transform" 
                   referrerPolicy="no-referrer"
                 />
               </motion.div>

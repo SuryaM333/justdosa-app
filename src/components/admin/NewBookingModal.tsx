@@ -5,6 +5,7 @@ import { Booking, Customer } from '../../types';
 import { dataService } from '../../services/dataService';
 import { getRequiredTableSeats } from '../../utils/bookingUtils';
 import { formatAusMobile, cleanPhoneNumber, isValidAusMobile } from '../../utils/phone';
+import { TimeWheelPicker, getAvailableTimeSlotsShared } from '../TimeWheelPicker';
 
 interface NewBookingModalProps {
   isOpen: boolean;
@@ -92,56 +93,17 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
       .reduce((sum, b) => sum + (b.partySize || 0), 0);
   };
 
-  const getAvailableTimeSlots = (dateStr: string) => {
-    const day = getDayOfWeek(dateStr);
-    if (day === 2) return []; // Closed Tuesdays
-    
-    const slots: { value: string; label: string }[] = [];
-    
-    // Saturday or Sunday lunch
-    if (day === 6 || day === 0) {
-      const lunchStart = dataService.getLunchStartTime();
-      const lunchEnd = dataService.getLunchEndTime();
-      const [lStartHour, lStartMin] = lunchStart.split(':').map(Number);
-      const [lEndHour, lEndMin] = lunchEnd.split(':').map(Number);
+  const getAvailableTimeSlots = getAvailableTimeSlotsShared;
 
-      let hour = lStartHour;
-      let min = lStartMin;
-      while (hour < lEndHour || (hour === lEndHour && min <= lEndMin)) {
-        const val = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
-        const ampm = hour >= 12 ? 'PM' : 'AM';
-        const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
-        slots.push({ value: val, label: `${displayHour}:${min.toString().padStart(2, '0')} ${ampm} (Lunch)` });
-        min += 15;
-        if (min === 60) {
-          min = 0;
-          hour += 1;
-        }
+  // Auto-select valid time slot when booking date or selected time changes
+  useEffect(() => {
+    const slots = getAvailableTimeSlotsShared(bookingDate);
+    if (slots.length > 0) {
+      if (!slots.some((s) => s.value === bookingTime)) {
+        setBookingTime(slots[0].value);
       }
     }
-    
-    // Wednesday to Monday dinner
-    const dinnerStart = dataService.getDinnerStartTime();
-    const dinnerEnd = dataService.getDinnerEndTime();
-    const [dStartHour, dStartMin] = dinnerStart.split(':').map(Number);
-    const [dEndHour, dEndMin] = dinnerEnd.split(':').map(Number);
-
-    let hour = dStartHour;
-    let min = dStartMin;
-    while (hour < dEndHour || (hour === dEndHour && min <= dEndMin)) {
-      const val = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
-      const ampm = hour >= 12 ? 'PM' : 'AM';
-      const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
-      slots.push({ value: val, label: `${displayHour}:${min.toString().padStart(2, '0')} ${ampm} (Dinner)` });
-      min += 15;
-      if (min === 60) {
-        min = 0;
-        hour += 1;
-      }
-    }
-    
-    return slots;
-  };
+  }, [bookingDate, bookingTime]);
 
   // Autocompletes customer fields when a match is found
   useEffect(() => {
@@ -491,18 +453,17 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
                         <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
                           Booking Time *
                         </label>
-                        <select
-                          value={bookingTime}
-                          onChange={(e) => setBookingTime(e.target.value)}
-                          disabled={getDayOfWeek(bookingDate) === 2}
-                          className="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-sm text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all disabled:opacity-50"
-                        >
-                          {currentSlots.map((slot) => (
-                            <option key={slot.value} value={slot.value}>
-                              {slot.label}
-                            </option>
-                          ))}
-                        </select>
+                        {getDayOfWeek(bookingDate) === 2 ? (
+                          <div className="py-3 px-4 bg-rose-500/10 text-rose-500 text-xs font-bold rounded-xl border border-rose-500/20 text-center">
+                            Closed Tuesdays
+                          </div>
+                        ) : (
+                          <TimeWheelPicker
+                            slots={currentSlots}
+                            selectedValue={bookingTime}
+                            onChange={setBookingTime}
+                          />
+                        )}
                       </div>
                     )}
                   </div>

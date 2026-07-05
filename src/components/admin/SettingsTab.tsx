@@ -436,11 +436,12 @@ export const SettingsTab: React.FC = () => {
               <button
                 type="button"
                 onClick={() => {
+                  localStorage.removeItem('just_dosa_admin_device_v2');
                   localStorage.removeItem('just_dosa_admin_device');
                   sessionStorage.removeItem('just_dosa_admin_auth');
                   sessionStorage.removeItem('just_dosa_admin_role');
                   sessionStorage.removeItem('just_dosa_admin_auth_time');
-                  window.location.href = '/';
+                  window.location.href = window.location.origin + '/';
                 }}
                 className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition-colors cursor-pointer"
               >

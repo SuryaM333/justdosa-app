@@ -11,8 +11,11 @@ export default function App() {
   const [hash, setHash] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     const isModeAdmin = params.get('mode') === 'admin';
-    const isAdminDevice = localStorage.getItem('just_dosa_admin_device') === 'true';
+    const isAdminDevice = localStorage.getItem('just_dosa_admin_device_v2') === 'true';
     if (isModeAdmin || isAdminDevice) {
+      if (isModeAdmin) {
+        localStorage.setItem('just_dosa_admin_device_v2', 'true');
+      }
       return '#/admin';
     }
     return window.location.hash;
@@ -115,14 +118,47 @@ export default function App() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const isModeAdmin = params.get('mode') === 'admin';
-    const isAdminDevice = localStorage.getItem('just_dosa_admin_device') === 'true';
+    const isAdminDevice = localStorage.getItem('just_dosa_admin_device_v2') === 'true';
+
+    let nextPathname = window.location.pathname;
+    let nextHash = window.location.hash;
+    let urlChanged = false;
+
     if (isModeAdmin || isAdminDevice) {
-      if (window.location.hash !== '#/admin') {
-        window.history.replaceState({}, '', '#/admin');
-        setHash('#/admin');
+      if (isModeAdmin) {
+        localStorage.setItem('just_dosa_admin_device_v2', 'true');
+      }
+      
+      // Ensure pathname is '/' and hash is '#/admin' and search is empty
+      if (window.location.pathname !== '/' || window.location.hash !== '#/admin' || window.location.search !== '') {
+        window.history.replaceState({}, '', '/#/admin');
+        nextPathname = '/';
+        nextHash = '#/admin';
+        urlChanged = true;
+      }
+    } else {
+      // Normal customer mode
+      // Let's check for combined path like /customer#/admin or /admin
+      const hasLeftoverAdminHash = window.location.hash === '#/admin' || window.location.hash === '#admin';
+      const isNotRootPath = window.location.pathname !== '/';
+      const hasSearchParams = window.location.search !== '';
+      
+      if (isNotRootPath || hasSearchParams) {
+        // If we have a non-root path combined with an admin hash, clear the hash too!
+        const targetHash = hasLeftoverAdminHash ? '' : window.location.hash;
+        const cleanURL = '/' + targetHash;
+        window.history.replaceState({}, '', cleanURL);
+        nextPathname = '/';
+        nextHash = targetHash;
+        urlChanged = true;
       }
     }
-  }, []);
+
+    if (urlChanged || pathname !== nextPathname || hash !== nextHash) {
+      setPathname(nextPathname);
+      setHash(nextHash);
+    }
+  }, [pathname, hash]);
 
   const isAdminRoute = pathname === '/admin' || pathname.startsWith('/admin') || hash === '#/admin' || hash === '#admin' || hash.startsWith('#/admin/') || hash.startsWith('#admin/');
   const isPinModalOpen = isAdminRoute && !isAdminAuthenticated;
@@ -131,7 +167,7 @@ export default function App() {
     sessionStorage.setItem('just_dosa_admin_auth', 'true');
     sessionStorage.setItem('just_dosa_admin_role', role);
     sessionStorage.setItem('just_dosa_admin_auth_time', Date.now().toString());
-    localStorage.setItem('just_dosa_admin_device', 'true');
+    localStorage.setItem('just_dosa_admin_device_v2', 'true');
     setIsAdminAuthenticated(true);
     setAdminRole(role);
   };
@@ -154,9 +190,8 @@ export default function App() {
     sessionStorage.removeItem('just_dosa_admin_auth_time');
     setIsAdminAuthenticated(false);
     setAdminRole(null);
-    sessionStorage.setItem('just_dosa_skip_welcome_intro', 'true');
-    window.history.pushState({}, '', '#/admin');
-    setPathname('#/admin');
+    window.history.replaceState({}, '', '/#/admin');
+    setPathname('/');
     setHash('#/admin');
   };
 

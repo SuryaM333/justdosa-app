@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Utensils, Clock, Calendar, Users, Baby, Phone, MessageSquare, CheckCircle2, Sparkles, ArrowLeft, AlertCircle, XCircle, QrCode } from 'lucide-react';
 import { Booking } from '../../types';
-import { dataService } from '../../services/dataService';
+import { dataService, db } from '../../services/dataService';
+import { doc, onSnapshot } from 'firebase/firestore';
 import { formatAusMobile, isValidAusMobile } from '../../utils/phone';
 import { formatPartyBreakdown } from '../../utils/bookingUtils';
 import { SignatureDishShowcase } from './SignatureDishShowcase';
 import { LOGO_BASE64 } from '../logoBase64';
+import { TimeWheelPicker, getAvailableTimeSlotsShared } from '../TimeWheelPicker';
 
 export const CustomerView: React.FC = () => {
   const [showIntro, setShowIntro] = useState(() => {
@@ -43,6 +45,8 @@ export const CustomerView: React.FC = () => {
     totalWaiting: 0,
     estimatedWaitMinutes: 0,
   });
+  const [prevStatus, setPrevStatus] = useState<string | null>(null);
+  const [showStatusHighlight, setShowStatusHighlight] = useState(false);
 
   // Automatically load bookingId from URL if present
   useEffect(() => {
@@ -111,47 +115,63 @@ export const CustomerView: React.FC = () => {
     setChildrenHighChairs((prev) => Array.from({ length: validCount }, (_, i) => prev[i] ?? false));
   };
 
-  // Subscribe to live data changes and poll for active booking state
+  // Subscribe to live data changes directly via Firestore onSnapshot
   useEffect(() => {
-    const updateActiveBookingState = () => {
-      if (!activeBookingId) {
-        setActiveBooking(null);
-        return;
-      }
-      const bookings = dataService.getBookings();
-      const found = bookings.find((b) => b.id === activeBookingId);
-      if (found) {
-        setActiveBooking(found);
-        if (!hasRoutedOnLoad) {
-          if (found.type === 'walk-in' && (found.status === 'waiting' || found.status === 'seated' || found.status === 'finished')) {
-            setActiveTab('status');
-          } else if (found.type === 'remote' && ['booked', 'pending', 'confirmed', 'declined', 'alternative_proposed', 'cancelled'].includes(found.status)) {
-            setActiveTab('confirmation');
-          }
-          setHasRoutedOnLoad(true);
-        }
-        
-        // Always keep queueInfo up to date
-        if (found.type === 'walk-in') {
-          const qInfo = dataService.getWaitingQueuePosition(found.id);
-          setQueueInfo(qInfo);
-        }
-      } else {
-        setActiveBooking(null);
-        localStorage.removeItem('just_dosa_active_customer_booking_id');
-        setActiveBookingId(null);
-      }
-    };
+    if (!activeBookingId) {
+      setActiveBooking(null);
+      return;
+    }
 
-    updateActiveBookingState();
-    const unsubscribe = dataService.subscribe(updateActiveBookingState);
-    const pollInterval = setInterval(updateActiveBookingState, 2000);
+    const bookingDocRef = doc(db, 'bookings', activeBookingId);
+    const unsubscribeSnapshot = onSnapshot(bookingDocRef, (docSnap) => {
+      try {
+        if (docSnap.exists()) {
+          const found = docSnap.data() as Booking;
+          setActiveBooking(found);
+          if (!hasRoutedOnLoad) {
+            if (found.type === 'walk-in' && (found.status === 'waiting' || found.status === 'seated' || found.status === 'finished')) {
+              setActiveTab('status');
+            } else if (found.type === 'remote' && ['booked', 'pending', 'confirmed', 'declined', 'alternative_proposed', 'cancelled'].includes(found.status)) {
+              setActiveTab('confirmation');
+            }
+            setHasRoutedOnLoad(true);
+          }
+          
+          // Always keep queueInfo up to date
+          if (found.type === 'walk-in') {
+            const qInfo = dataService.getWaitingQueuePosition(found.id);
+            setQueueInfo(qInfo);
+          }
+        } else {
+          setActiveBooking(null);
+          localStorage.removeItem('just_dosa_active_customer_booking_id');
+          setActiveBookingId(null);
+        }
+      } catch (err) {
+        console.error("Error in booking document onSnapshot: ", err);
+      }
+    }, (error) => {
+      console.error("Firestore subscription error for active booking: ", error);
+    });
 
     return () => {
-      unsubscribe();
-      clearInterval(pollInterval);
+      unsubscribeSnapshot();
     };
   }, [activeBookingId, hasRoutedOnLoad]);
+
+  // Track status changes to trigger visual pulse animation and highlight
+  useEffect(() => {
+    if (activeBooking) {
+      if (prevStatus && prevStatus !== activeBooking.status) {
+        setShowStatusHighlight(true);
+        const timer = setTimeout(() => setShowStatusHighlight(false), 4000);
+        return () => clearTimeout(timer);
+      }
+      setPrevStatus(activeBooking.status);
+    } else {
+      setPrevStatus(null);
+    }
+  }, [activeBooking?.status, prevStatus]);
 
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const formatted = formatAusMobile(e.target.value);
@@ -166,58 +186,7 @@ export const CustomerView: React.FC = () => {
       .reduce((sum, b) => sum + (b.partySize || 0), 0);
   };
 
-  const getAvailableTimeSlots = (dateStr: string) => {
-    const day = getDayOfWeek(dateStr);
-    if (day === 2) return []; // Closed Tuesdays
-    
-    const slots: { value: string; label: string; timeString: string }[] = [];
-    
-    // Saturday or Sunday lunch (11:00 AM - 3:00 PM). Last slot is 1 hour before close, i.e., 2:00 PM (14:00)
-    if (day === 6 || day === 0) {
-      const lunchStart = dataService.getLunchStartTime();
-      const [lStartHour, lStartMin] = lunchStart.split(':').map(Number);
-      const lEndHour = 14; // 1 hour before 15:00
-      const lEndMin = 0;
-
-      let hour = lStartHour;
-      let min = lStartMin;
-      while (hour < lEndHour || (hour === lEndHour && min <= lEndMin)) {
-        const val = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
-        const ampm = hour >= 12 ? 'PM' : 'AM';
-        const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
-        const timeString = `${displayHour}:${min.toString().padStart(2, '0')} ${ampm}`;
-        slots.push({ value: val, label: `${timeString} (Lunch)`, timeString });
-        min += 15;
-        if (min === 60) {
-          min = 0;
-          hour += 1;
-        }
-      }
-    }
-    
-    // Wednesday to Monday dinner (5:30 PM - 10:00 PM). Last slot is 1 hour before close, i.e., 9:00 PM (21:00)
-    const dinnerStart = dataService.getDinnerStartTime();
-    const [dStartHour, dStartMin] = dinnerStart.split(':').map(Number);
-    const dEndHour = 21; // 1 hour before 22:00
-    const dEndMin = 0;
-
-    let hour = dStartHour;
-    let min = dStartMin;
-    while (hour < dEndHour || (hour === dEndHour && min <= dEndMin)) {
-      const val = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
-      const ampm = hour >= 12 ? 'PM' : 'AM';
-      const displayHour = hour > 12 ? hour - 12 : (hour === 0 ? 12 : hour);
-      const timeString = `${displayHour}:${min.toString().padStart(2, '0')} ${ampm}`;
-      slots.push({ value: val, label: `${timeString} (Dinner)`, timeString });
-      min += 15;
-      if (min === 60) {
-        min = 0;
-        hour += 1;
-      }
-    }
-    
-    return slots;
-  };
+  const getAvailableTimeSlots = getAvailableTimeSlotsShared;
 
   useEffect(() => {
     const slots = getAvailableTimeSlots(bookingDate);
@@ -350,10 +319,28 @@ export const CustomerView: React.FC = () => {
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="w-full max-w-md bg-[#26221E] rounded-3xl p-6 sm:p-8 shadow-xl border border-[#3D352E] text-center relative overflow-hidden"
+          className={`w-full max-w-md bg-[#26221E] rounded-3xl p-6 sm:p-8 shadow-xl text-center relative overflow-hidden transition-all duration-500 ${
+            showStatusHighlight 
+              ? 'border-2 border-emerald-500 shadow-xl shadow-emerald-500/20 scale-[1.02]' 
+              : 'border border-[#3D352E]'
+          }`}
         >
           {/* Top accent line */}
           <div className={`absolute top-0 left-0 right-0 h-2 ${isFinished ? 'bg-[#E37A08]' : isReady ? 'bg-[#22C55E]' : 'bg-[#E37A08]'}`} />
+
+          <AnimatePresence>
+            {showStatusHighlight && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="bg-emerald-500 text-white text-xs font-bold py-2 px-4 -mx-8 -mt-8 mb-6 uppercase tracking-wider flex items-center justify-center gap-1.5 animate-pulse"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>Booking Status Updated Live!</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {isFinished ? (
             <motion.div
@@ -504,9 +491,27 @@ export const CustomerView: React.FC = () => {
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="w-full max-w-md bg-[#26221E] rounded-3xl p-6 sm:p-8 shadow-xl border border-[#3D352E] text-center relative overflow-hidden"
+          className={`w-full max-w-md bg-[#26221E] rounded-3xl p-6 sm:p-8 shadow-xl text-center relative overflow-hidden transition-all duration-500 ${
+            showStatusHighlight 
+              ? 'border-2 border-emerald-500 shadow-xl shadow-emerald-500/20 scale-[1.02]' 
+              : 'border border-[#3D352E]'
+          }`}
         >
           <div className={`absolute top-0 left-0 right-0 h-2 ${isCancelled ? 'bg-[#EF4444]' : isPending ? 'bg-[#F59E0B]' : isDeclined ? 'bg-rose-500' : isAltProposed ? 'bg-amber-400 animate-pulse' : 'bg-[#22C55E]'}`} />
+
+          <AnimatePresence>
+            {showStatusHighlight && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="bg-emerald-500 text-white text-xs font-bold py-2 px-4 -mx-8 -mt-8 mb-6 uppercase tracking-wider flex items-center justify-center gap-1.5 animate-pulse"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>Booking Status Updated Live!</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {isCancelled ? (
             <div>
@@ -1052,25 +1057,11 @@ export const CustomerView: React.FC = () => {
                             Closed Tuesdays
                           </div>
                         ) : (
-                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-36 overflow-y-auto p-1.5 bg-[#F5F2EA]/40 dark:bg-[#1C1917]/40 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E]">
-                            {getAvailableTimeSlots(bookingDate).map((slot) => {
-                              const isSelected = bookingTime === slot.value;
-                              return (
-                                <button
-                                  key={slot.value}
-                                  type="button"
-                                  onClick={() => setBookingTime(slot.value)}
-                                  className={`py-1.5 px-2 text-[11px] font-bold rounded-lg border transition-all text-center ${
-                                    isSelected
-                                      ? 'bg-[#E37A08] border-transparent text-white shadow-sm'
-                                      : 'bg-white dark:bg-[#26221E] text-[#6B5E4C] dark:text-[#B8ACA0] border-[#E8E2D2] dark:border-[#3D352E] hover:border-[#E37A08]/50'
-                                  }`}
-                                >
-                                  {slot.timeString}
-                                </button>
-                              );
-                            })}
-                          </div>
+                          <TimeWheelPicker
+                            slots={getAvailableTimeSlots(bookingDate)}
+                            selectedValue={bookingTime}
+                            onChange={setBookingTime}
+                          />
                         )}
                       </div>
                     )}
