@@ -9,6 +9,29 @@ import { SignatureDishShowcase } from './SignatureDishShowcase';
 import { LOGO_BASE64 } from '../logoBase64';
 
 export const CustomerView: React.FC = () => {
+  const [showIntro, setShowIntro] = useState(() => {
+    return !sessionStorage.getItem('just_dosa_skip_welcome_intro');
+  });
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setPrefersReducedMotion(mediaQuery.matches);
+    const listener = (e: MediaQueryListEvent) => setPrefersReducedMotion(e.matches);
+    mediaQuery.addEventListener('change', listener);
+    return () => mediaQuery.removeEventListener('change', listener);
+  }, []);
+
+  useEffect(() => {
+    if (showIntro) {
+      const timer = setTimeout(() => {
+        setShowIntro(false);
+        sessionStorage.setItem('just_dosa_skip_welcome_intro', 'true');
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [showIntro]);
+
   const [activeTab, setActiveTab] = useState<'walk-in' | 'remote' | 'status' | 'confirmation'>('walk-in');
   const [activeBookingId, setActiveBookingId] = useState<string | null>(() => {
     return localStorage.getItem('just_dosa_active_customer_booking_id') || null;
@@ -655,49 +678,116 @@ export const CustomerView: React.FC = () => {
   }
 
   // Render main form / selection
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.06,
+        delayChildren: prefersReducedMotion ? 0 : 0.05,
+      }
+    }
+  };
+
+  const itemVariants = prefersReducedMotion ? {
+    hidden: { opacity: 0 },
+    visible: { opacity: 1, transition: { duration: 0.4 } }
+  } : {
+    hidden: { opacity: 0, y: 25 },
+    visible: { 
+      opacity: 1, 
+      y: 0, 
+      transition: { 
+        type: "spring", 
+        damping: 18, 
+        stiffness: 110 
+      } 
+    }
+  };
+
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-[#12100E] bg-linear-to-b from-[#1C1917] via-[#151210] to-[#12100E] py-8 px-4 sm:px-6 relative overflow-hidden">
-      {/* Subtle banana leaf background glow accent */}
-      <div className="absolute top-0 right-0 w-64 h-64 bg-[#22C55E]/5 dark:bg-[#22C55E]/2 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-0 left-0 w-80 h-80 bg-[#E37A08]/5 dark:bg-[#E37A08]/2 rounded-full blur-3xl pointer-events-none" />
+    <>
+      <AnimatePresence mode="wait">
+        {showIntro && (
+          <motion.div
+            key="welcome-intro"
+            initial={{ opacity: 1 }}
+            exit={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: -80 }}
+            transition={{ duration: 0.4, ease: [0.25, 1, 0.5, 1] }}
+            className="fixed inset-0 z-100 flex flex-col items-center justify-center bg-[#12100E]"
+          >
+            <motion.div
+              initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, scale: 0.65 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={prefersReducedMotion ? { duration: 0.5 } : { type: "spring", damping: 15, stiffness: 100, delay: 0.1 }}
+              className="w-56 h-56 mb-4 flex items-center justify-center"
+            >
+              <img src={LOGO_BASE64} alt="Just Dosa Logo" className="w-full h-full object-contain drop-shadow-[0_10px_20px_rgba(227,122,8,0.25)]" referrerPolicy="no-referrer" />
+            </motion.div>
+            <motion.div
+              initial={prefersReducedMotion ? { opacity: 0 } : { opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, ease: "easeOut", delay: 0.4 }}
+              className="text-center"
+            >
+              <h1 className="font-serif text-3xl font-bold text-[#D2B48C] tracking-tight">
+                Welcome to Just Dosa
+              </h1>
+              <p className="text-xs text-[#B8ACA0] tracking-widest uppercase mt-2 font-medium">
+                Melbourne
+              </p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      <div className="max-w-xl mx-auto relative z-10">
-        {/* Welcome Header */}
-        <div className="text-center mb-8">
-          <div className="w-56 h-56 mx-auto mb-2 flex items-center justify-center bg-transparent shrink-0">
-            <img src={LOGO_BASE64} alt="Just Dosa Logo" className="w-full h-full object-contain drop-shadow-md animate-[pulse_3s_infinite]" referrerPolicy="no-referrer" />
-          </div>
-          <span className="inline-block px-3 py-1 rounded-md bg-[#F5F2EA] dark:bg-[#26221E] text-[#8B4513] dark:text-[#D2B48C] border border-[#E8E2D2] dark:border-[#3D352E] text-xs font-bold uppercase tracking-widest mb-2">
-            Authentic South Indian • Mill Park, Melbourne
-          </span>
-          <h1 className="font-serif text-3xl sm:text-4xl font-bold text-[#2D2926] dark:text-white tracking-tight mb-2">
-            Welcome to <span className="text-[#8B4513] dark:text-[#D2B48C]">Just Dosa</span>
-          </h1>
-          <p className="text-sm text-[#6B5E4C] dark:text-[#B8ACA0] mb-4">
-            Select an option below to join the live queue or reserve for later.
-          </p>
+      <div className="min-h-[calc(100vh-4rem)] bg-[#12100E] bg-linear-to-b from-[#1C1917] via-[#151210] to-[#12100E] py-8 px-4 sm:px-6 relative overflow-hidden">
+        {/* Subtle banana leaf background glow accent */}
+        <div className="absolute top-0 right-0 w-64 h-64 bg-[#22C55E]/5 dark:bg-[#22C55E]/2 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 left-0 w-80 h-80 bg-[#E37A08]/5 dark:bg-[#E37A08]/2 rounded-full blur-3xl pointer-events-none" />
 
-          {/* Operating Hours Info Badge */}
-          <div className="mt-4 inline-flex flex-col sm:flex-row flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-[11px] text-[#6B5E4C] dark:text-[#B8ACA0] bg-[#F5F2EA]/60 dark:bg-[#26221E]/40 px-4 py-2.5 rounded-2xl border border-[#E8E2D2]/60 dark:border-[#3D352E]/60 max-w-lg mx-auto shadow-2xs font-medium">
-            <div className="flex items-center gap-1.5">
-              <span className="inline-block w-2 h-2 rounded-full bg-rose-500 shrink-0" />
-              <span><strong className="font-bold">Tue:</strong> Closed</span>
+        <motion.div 
+          variants={containerVariants}
+          initial="hidden"
+          animate="visible"
+          className="max-w-xl mx-auto relative z-10"
+        >
+          {/* Welcome Header */}
+          <motion.div variants={itemVariants} className="text-center mb-8">
+            <div className="w-56 h-56 mx-auto mb-2 flex items-center justify-center bg-transparent shrink-0">
+              <img src={LOGO_BASE64} alt="Just Dosa Logo" className="w-full h-full object-contain drop-shadow-md animate-[pulse_3s_infinite]" referrerPolicy="no-referrer" />
             </div>
-            <div className="hidden sm:block text-[#E8E2D2] dark:text-[#3D352E]">|</div>
-            <div className="flex items-center gap-1.5">
-              <span className="inline-block w-2 h-2 rounded-full bg-amber-500 shrink-0" />
-              <span><strong className="font-bold">Mon, Wed-Fri:</strong> Dinner 5:30 PM - 10:00 PM</span>
-            </div>
-            <div className="hidden sm:block text-[#E8E2D2] dark:text-[#3D352E]">|</div>
-            <div className="flex items-center gap-1.5">
-              <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-              <span><strong className="font-bold">Sat-Sun:</strong> Lunch 11:00 AM - 3:00 PM &amp; Dinner 5:30 PM - 10:00 PM</span>
-            </div>
-          </div>
-        </div>
+            <span className="inline-block px-3 py-1 rounded-md bg-[#F5F2EA] dark:bg-[#26221E] text-[#8B4513] dark:text-[#D2B48C] border border-[#E8E2D2] dark:border-[#3D352E] text-xs font-bold uppercase tracking-widest mb-2">
+              Authentic South Indian • Mill Park, Melbourne
+            </span>
+            <h1 className="font-serif text-3xl sm:text-4xl font-bold text-[#2D2926] dark:text-white tracking-tight mb-2">
+              Welcome to <span className="text-[#8B4513] dark:text-[#D2B48C]">Just Dosa</span>
+            </h1>
+            <p className="text-sm text-[#6B5E4C] dark:text-[#B8ACA0] mb-4">
+              Select an option below to join the live queue or reserve for later.
+            </p>
 
-        {/* Option Selectors */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
+            {/* Operating Hours Info Badge */}
+            <div className="mt-4 inline-flex flex-col sm:flex-row flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-[11px] text-[#6B5E4C] dark:text-[#B8ACA0] bg-[#F5F2EA]/60 dark:bg-[#26221E]/40 px-4 py-2.5 rounded-2xl border border-[#E8E2D2]/60 dark:border-[#3D352E]/60 max-w-lg mx-auto shadow-2xs font-medium">
+              <div className="flex items-center gap-1.5">
+                <span className="inline-block w-2 h-2 rounded-full bg-rose-500 shrink-0" />
+                <span><strong className="font-bold">Tue:</strong> Closed</span>
+              </div>
+              <div className="hidden sm:block text-[#E8E2D2] dark:text-[#3D352E]">|</div>
+              <div className="flex items-center gap-1.5">
+                <span className="inline-block w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+                <span><strong className="font-bold">Mon, Wed-Fri:</strong> Dinner 5:30 PM - 10:00 PM</span>
+              </div>
+              <div className="hidden sm:block text-[#E8E2D2] dark:text-[#3D352E]">|</div>
+              <div className="flex items-center gap-1.5">
+                <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                <span><strong className="font-bold">Sat-Sun:</strong> Lunch 11:00 AM - 3:00 PM &amp; Dinner 5:30 PM - 10:00 PM</span>
+              </div>
+            </div>
+          </motion.div>
+
+          {/* Option Selectors */}
+          <motion.div variants={itemVariants} className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
           <button
             onClick={() => {
               setActiveTab('walk-in');
@@ -755,16 +845,17 @@ export const CustomerView: React.FC = () => {
               </p>
             </div>
           </button>
-        </div>
+        </motion.div>
 
         {/* Form Container */}
-        <motion.div
-          key={activeTab}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.2 }}
-          className="bg-white dark:bg-[#26221E] rounded-3xl p-6 sm:p-8 shadow-xl border border-[#E8E2D2] dark:border-[#3D352E]"
-        >
+        <motion.div variants={itemVariants}>
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2 }}
+            className="bg-white dark:bg-[#26221E] rounded-3xl p-6 sm:p-8 shadow-xl border border-[#E8E2D2] dark:border-[#3D352E]"
+          >
           <div className="flex items-center gap-2 pb-4 mb-6 border-b border-[#E8E2D2] dark:border-[#3D352E]">
             <div className={`w-3 h-3 rounded-full ${activeTab === 'walk-in' ? 'bg-[#E37A08]' : 'bg-[#8B4513]'}`} />
             <h2 className="font-serif font-bold text-lg text-[#2D2926] dark:text-white">
@@ -1130,25 +1221,27 @@ export const CustomerView: React.FC = () => {
             </button>
           </form>
         </motion.div>
+      </motion.div>
 
-        {/* Existing Active Booking Shortcut if available */}
-        {activeBookingId && activeBooking && (
-          <div className="mt-6 p-4 rounded-2xl bg-[#F5F2EA] dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] flex items-center justify-between text-xs relative z-20">
-            <div>
-              <span className="font-bold text-[#8B4513] dark:text-[#D2B48C] block">You have an active session!</span>
-              <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">
-                {activeBooking.firstName} ({formatPartyBreakdown(activeBooking)}) — {activeBooking.status.toUpperCase()}
-              </span>
-            </div>
-            <button
-              onClick={() => setActiveTab(activeBooking.status === 'booked' || activeBooking.status === 'cancelled' || activeBooking.status === 'alternative_proposed' ? 'confirmation' : 'status')}
-              className="px-3 py-1.5 rounded-lg bg-[#E37A08] text-white font-bold hover:bg-[#C96905] shadow-sm"
-            >
-              View Status →
-            </button>
+      {/* Existing Active Booking Shortcut if available */}
+      {activeBookingId && activeBooking && (
+        <motion.div variants={itemVariants} className="mt-6 p-4 rounded-2xl bg-[#F5F2EA] dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] flex items-center justify-between text-xs relative z-20">
+          <div>
+            <span className="font-bold text-[#8B4513] dark:text-[#D2B48C] block">You have an active session!</span>
+            <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">
+              {activeBooking.firstName} ({formatPartyBreakdown(activeBooking)}) — {activeBooking.status.toUpperCase()}
+            </span>
           </div>
-        )}
-      </div>
-    </div>
+          <button
+            onClick={() => setActiveTab(activeBooking.status === 'booked' || activeBooking.status === 'cancelled' || activeBooking.status === 'alternative_proposed' ? 'confirmation' : 'status')}
+            className="px-3 py-1.5 rounded-lg bg-[#E37A08] text-white font-bold hover:bg-[#C96905] shadow-sm"
+          >
+            View Status →
+          </button>
+        </motion.div>
+      )}
+    </motion.div>
+  </div>
+</>
   );
 };

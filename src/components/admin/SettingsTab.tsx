@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KeyRound, Shield, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
+import { KeyRound, Shield, CheckCircle, AlertCircle, RefreshCw, Smartphone } from 'lucide-react';
 import { dataService } from '../../services/dataService';
 
 export const SettingsTab: React.FC = () => {
@@ -24,6 +24,7 @@ export const SettingsTab: React.FC = () => {
 
   const [ownerSuccess, setOwnerSuccess] = useState<string | null>(null);
   const [ownerError, setOwnerError] = useState<string | null>(null);
+  const [showConfirmConvert, setShowConfirmConvert] = useState(false);
 
   const handleUpdateStaffPin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -392,6 +393,69 @@ export const SettingsTab: React.FC = () => {
             Save Configuration
           </button>
         </form>
+      </div>
+
+      {/* Device Mode Configuration */}
+      <div className="bg-white dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] rounded-3xl p-6 shadow-sm">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="w-10 h-10 rounded-xl bg-[#E37A08]/10 flex items-center justify-center">
+            <Smartphone className="w-5 h-5 text-[#E37A08]" />
+          </div>
+          <div>
+            <h3 className="text-base font-serif font-bold text-[#2D2926] dark:text-white">
+              Device Mode Configuration
+            </h3>
+            <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0]">
+              Convert this physical terminal between Admin/Staff Mode and Customer Mode.
+            </p>
+          </div>
+        </div>
+
+        <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0] mt-3 mb-4 leading-relaxed">
+          Currently, this device is locked to <strong className="text-[#2D2926] dark:text-white">Admin & Staff Mode</strong>. It will bypass the Customer Welcome screen and only display the lock screen or admin dashboards. Reverting it to customer mode will restore the customer reservation and queue interface.
+        </p>
+
+        {!showConfirmConvert ? (
+          <button
+            type="button"
+            onClick={() => setShowConfirmConvert(true)}
+            className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-sm transition-colors cursor-pointer"
+          >
+            Convert this device to customer mode
+          </button>
+        ) : (
+          <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 space-y-4">
+            <div className="flex items-start gap-2.5 text-xs text-rose-700 dark:text-rose-400">
+              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold block mb-1">Confirm Device Mode Conversion</span>
+                Are you absolutely sure you want to convert this terminal to customer mode? This action will remove the administrator designation from this device, clear active credentials, and redirect immediately to the customer registration page.
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  localStorage.removeItem('just_dosa_admin_device');
+                  sessionStorage.removeItem('just_dosa_admin_auth');
+                  sessionStorage.removeItem('just_dosa_admin_role');
+                  sessionStorage.removeItem('just_dosa_admin_auth_time');
+                  window.location.href = '/';
+                }}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs transition-colors cursor-pointer"
+              >
+                Yes, Convert to Customer Mode
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowConfirmConvert(false)}
+                className="px-4 py-2 rounded-xl bg-white dark:bg-[#1C1917] hover:bg-[#E8E2D2] dark:hover:bg-[#3D352E] text-[#2D2926] dark:text-white border border-[#E8E2D2] dark:border-[#3D352E] font-bold text-xs transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
