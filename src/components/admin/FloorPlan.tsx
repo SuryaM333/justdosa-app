@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, CheckCircle2, AlertTriangle, Ban, Clock, X, Check, Plus, UserCheck, DoorOpen, Bath, UtensilsCrossed, Store, Baby } from 'lucide-react';
+import { Users, CheckCircle2, AlertTriangle, Ban, Clock, X, Check, Plus, UserCheck, DoorOpen, Bath, UtensilsCrossed, Store, Baby, GitMerge } from 'lucide-react';
 import { Table, Booking } from '../../types';
 import { dataService } from '../../services/dataService';
 import { getRequiredTableSeats, formatPartyBreakdownShort } from '../../utils/bookingUtils';
@@ -28,6 +28,18 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [quickSeatName, setQuickSeatName] = useState('');
   const [quickSeatPhone, setQuickSeatPhone] = useState('');
   const [quickSeatServer, setQuickSeatServer] = useState('');
+  const [mergeMode, setMergeMode] = useState(false);
+  const [mergeFirstTableId, setMergeFirstTableId] = useState<number | null>(null);
+
+  const areTablesAdjacent = (t1: Table, t2: Table): boolean => {
+    if (t1.position.column === t2.position.column && Math.abs(t1.position.order - t2.position.order) === 1) {
+      return true;
+    }
+    if (Math.abs(t1.id - t2.id) === 1) {
+      return true;
+    }
+    return false;
+  };
 
   const getTableBooking = (table: Table): Booking | undefined => {
     if (!table.currentBookingId) return undefined;
@@ -83,6 +95,36 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
   const handleTableClick = async (table: Table) => {
     setErrorToast(null);
+
+    if (mergeMode) {
+      if (table.isOccupied || table.isInactive) {
+        setErrorToast("Can only merge vacant, active tables.");
+        return;
+      }
+
+      if (mergeFirstTableId === null) {
+        setMergeFirstTableId(table.id);
+      } else {
+        if (mergeFirstTableId === table.id) {
+          setMergeFirstTableId(null);
+          return;
+        }
+
+        const firstTable = tables.find(t => t.id === mergeFirstTableId);
+        if (!firstTable) return;
+
+        if (!areTablesAdjacent(firstTable, table)) {
+          setErrorToast("Tables must be adjacent to merge.");
+          return;
+        }
+
+        await dataService.mergeTables(mergeFirstTableId, table.id);
+        setMergeFirstTableId(null);
+        setMergeMode(false);
+        onTableUpdated();
+      }
+      return;
+    }
 
     // If table is occupied
     if (table.isOccupied) {
@@ -174,6 +216,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       ((table.id === 5 || table.id === 6 || table.id === 7) && requiredSeats <= table.maxOverrideCapacity)
     );
     const isBestFit = bestFitTable?.id === table.id;
+    const firstSelectedTable = mergeFirstTableId ? tables.find(t => t.id === mergeFirstTableId) : null;
+    const isAdjacentToFirst = firstSelectedTable && !table.isOccupied && !table.isInactive && areTablesAdjacent(firstSelectedTable, table);
+    const isFirstSelected = mergeFirstTableId === table.id;
 
     // Color coding: green = vacant, red = occupied, grey = inactive
     let bgStyle = 'bg-emerald-500/10 border-emerald-500 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/20';
@@ -184,6 +229,12 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     } else if (table.isOccupied) {
       bgStyle = 'bg-rose-500/15 border-rose-500 text-rose-800 dark:text-rose-300 hover:bg-rose-500/25 shadow-sm shadow-rose-500/10';
       badgeBg = 'bg-rose-500 text-white';
+    } else if (isFirstSelected) {
+      bgStyle = 'bg-amber-500/20 border-amber-500 text-amber-800 dark:text-amber-300 ring-4 ring-amber-500 hover:bg-amber-500/30 shadow-lg shadow-amber-500/40 animate-pulse border-2';
+      badgeBg = 'bg-amber-500 text-white';
+    } else if (isAdjacentToFirst) {
+      bgStyle = 'bg-orange-500/20 border-orange-500 text-orange-800 dark:text-orange-300 ring-4 ring-orange-500/50 hover:bg-orange-500/30 shadow-lg shadow-orange-500/40 animate-pulse border-2';
+      badgeBg = 'bg-orange-500 text-white';
     } else if (isBestFit) {
       bgStyle = 'bg-[#E37A08]/30 border-[#E37A08] text-[#8B4513] dark:text-[#D2B48C] hover:bg-[#E37A08]/40 ring-4 ring-[#E37A08] animate-pulse border-2 shadow-lg shadow-[#E37A08]/30';
       badgeBg = 'bg-[#E37A08] text-white';
@@ -215,9 +266,14 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         <div className={`flex flex-col items-center justify-center text-center p-2 ${isDiamond ? '-rotate-45' : ''}`}>
           {/* Table Number Badge */}
           <div className="flex flex-col items-center gap-0.5 mb-1.5">
-            <div className={`text-xs font-bold px-2 py-0.5 rounded-full shadow-sm ${badgeBg}`}>
-              {table.name}
+            <div className={`text-xs font-bold px-2 py-0.5 rounded-full shadow-sm flex items-center gap-1 ${badgeBg}`}>
+              <span>{table.name}</span>
             </div>
+            {table.mergedWith && (
+              <span className="text-[9px] font-black tracking-wider uppercase bg-blue-500 text-white px-1.5 py-0.5 rounded border border-blue-600 shadow-xs mt-0.5 whitespace-nowrap">
+                🔗 + Table {table.mergedWith}
+              </span>
+            )}
             {table.assignedServer && (
               <span className="text-[9px] font-bold tracking-wider uppercase bg-white/70 dark:bg-[#1C1917]/70 text-amber-800 dark:text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/20 shadow-xs mt-0.5 whitespace-nowrap">
                 👤 {table.assignedServer}
@@ -263,7 +319,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               </span>
               <div className="flex items-center gap-1 text-[10px] text-[#6B5E4C] dark:text-[#B8ACA0] mt-0.5 font-medium">
                 <Users className="w-3 h-3" />
-                <span>Cap: {table.capacity} {table.maxOverrideCapacity > table.capacity ? `(+1)` : ''}</span>
+                <span>
+                  Cap: {table.mergedWith ? table.capacity + (tables.find(t => t.id === table.mergedWith)?.capacity || 0) : table.capacity}
+                  {!table.mergedWith && table.maxOverrideCapacity > table.capacity ? ' (+1)' : ''}
+                </span>
               </div>
             </div>
           )}
@@ -295,18 +354,71 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           </p>
         </div>
 
-        {/* Legend */}
-        <div className="flex items-center gap-3 text-xs font-medium">
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded-md bg-emerald-500" />
-            <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Vacant</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded-md bg-rose-500" />
-            <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Occupied</span>
+        {/* Merge and Legend Controls */}
+        <div className="flex flex-wrap items-center gap-4">
+          <button
+            type="button"
+            onClick={() => {
+              if (mergeMode) {
+                setMergeFirstTableId(null);
+              }
+              setMergeMode(!mergeMode);
+              setErrorToast(null);
+            }}
+            className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm border ${
+              mergeMode
+                ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-amber-500/20 ring-2 ring-amber-500'
+                : 'bg-[#F5F2EA] dark:bg-[#1C1917] hover:bg-[#E8E2D2] dark:hover:bg-[#26221E] text-[#8B4513] dark:text-[#D2B48C] border-[#E8E2D2] dark:border-[#3D352E]'
+            }`}
+            title="Toggle Merge Tables Mode"
+          >
+            <GitMerge className="w-3.5 h-3.5" />
+            <span>{mergeMode ? 'Exit Merge Mode' : 'Merge Tables'}</span>
+          </button>
+
+          {/* Legend */}
+          <div className="flex items-center gap-3 text-xs font-medium">
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-md bg-emerald-500" />
+              <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Vacant</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-3 h-3 rounded-md bg-rose-500" />
+              <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Occupied</span>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Merge Mode Guidance Banner */}
+      <AnimatePresence>
+        {mergeMode && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mb-4 overflow-hidden"
+          >
+            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-xs text-amber-800 dark:text-amber-400 font-medium flex items-center justify-between">
+              <span>
+                {mergeFirstTableId === null
+                  ? '👉 Tap a vacant table to select it as the first table to merge.'
+                  : `🔗 Table Selected. Now tap an adjacent vacant table (pulsing with orange glow) to combine them.`}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setMergeFirstTableId(null);
+                  setMergeMode(false);
+                }}
+                className="text-[10px] underline font-bold"
+              >
+                Cancel
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Error Toast if allocation fails */}
       <AnimatePresence>
@@ -581,10 +693,26 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     Quick Seat Walk-In
                   </span>
                   <h3 className="font-serif font-bold text-lg text-[#2D2926] dark:text-white mt-1">
-                    Seat party at {quickSeatModal.name}
+                    {quickSeatModal.mergedWith 
+                      ? `Seat party at ${quickSeatModal.name} + Table ${quickSeatModal.mergedWith}`
+                      : `Seat party at ${quickSeatModal.name}`}
                   </h3>
+                  {quickSeatModal.mergedWith && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await dataService.dissolveMerge(quickSeatModal.id);
+                        setQuickSeatModal(null);
+                        onTableUpdated();
+                      }}
+                      className="mt-2 py-1 px-3 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 rounded-lg text-[11px] font-bold border border-rose-500/20 transition-all cursor-pointer flex items-center gap-1"
+                    >
+                      <span>⛓ Dissolve Table Merge</span>
+                    </button>
+                  )}
                 </div>
                 <button
+                  type="button"
                   onClick={() => setQuickSeatModal(null)}
                   className="p-1 rounded-full hover:bg-[#F5F2EA] dark:hover:bg-[#3D352E]"
                 >
@@ -610,7 +738,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     </span>
                     <button
                       type="button"
-                      onClick={() => setQuickSeatPartySize((prev) => Math.min(10, prev + 1))}
+                      onClick={() => {
+                        const otherMerged = quickSeatModal.mergedWith ? tables.find(t => t.id === quickSeatModal.mergedWith) : null;
+                        const maxCap = otherMerged ? quickSeatModal.capacity + otherMerged.capacity : quickSeatModal.maxOverrideCapacity;
+                        setQuickSeatPartySize((prev) => Math.min(maxCap, prev + 1));
+                      }}
                       className="w-10 h-10 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] font-bold text-lg border border-[#E8E2D2] flex items-center justify-center"
                     >
                       +

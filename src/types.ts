@@ -68,6 +68,7 @@ export interface Table {
   orderingUrl?: string; // For table QR ordering handoff
   branchId?: string;
   assignedServer?: string;
+  mergedWith?: number;
   position: {
     column: 'left' | 'middle' | 'right' | 'top';
     order: number;

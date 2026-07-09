@@ -1,0 +1,119 @@
+{
+  "entities": {
+    "Table": {
+      "title": "Table",
+      "description": "A restaurant dining table",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number" },
+        "name": { "type": "string" },
+        "capacity": { "type": "number" },
+        "maxOverrideCapacity": { "type": "number" },
+        "isOccupied": { "type": "boolean" },
+        "isInactive": { "type": "boolean" },
+        "currentBookingId": { "type": "string" },
+        "assignedServer": { "type": "string" },
+        "mergedWith": { "type": "number" }
+      },
+      "required": ["id", "name", "capacity"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "A table reservation or seating booking",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "phone": { "type": "string" },
+        "partySize": { "type": "number" },
+        "childSeats": { "type": "number" },
+        "adults": { "type": "number" },
+        "isKalyanaVirundhu": { "type": "boolean" },
+        "kalyanaSlot": { "type": "string" },
+        "alternativeTime": { "type": "string" },
+        "status": { "type": "string" },
+        "bookingDate": { "type": "string" }
+      },
+      "required": ["id", "firstName", "lastName", "phone", "partySize"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "A customer profile",
+      "type": "object",
+      "properties": {
+        "phone": { "type": "string" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "notes": { "type": "string" },
+        "tags": { "type": "array" }
+      },
+      "required": ["phone", "firstName", "lastName"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Global restaurant settings",
+      "type": "object",
+      "properties": {
+        "whatsappNumber": { "type": "string" },
+        "kalyanaCapacity": { "type": "number" },
+        "kalyanaEnabled": { "type": "boolean" },
+        "kalyanaSlots": { "type": "array" },
+        "openingHours": { "type": "object" },
+        "lunchStartTime": { "type": "string" },
+        "lunchEndTime": { "type": "string" },
+        "dinnerStartTime": { "type": "string" },
+        "dinnerEndTime": { "type": "string" },
+        "lunchBuffer": { "type": "number" },
+        "dinnerBuffer": { "type": "number" },
+        "slotInterval": { "type": "number" },
+        "waitTimeAlertThresholds": { "type": "object" },
+        "staffList": { "type": "array" },
+        "customerTexts": { "type": "object" }
+      }
+    },
+    "SecurePins": {
+      "title": "SecurePins",
+      "description": "Hashed admin and staff login PINs",
+      "type": "object",
+      "properties": {
+        "staffPinHash": { "type": "string" },
+        "ownerPinHash": { "type": "string" }
+      }
+    },
+    "SlotOccupancy": {
+      "title": "SlotOccupancy",
+      "description": "Kalyana Virundhu slot occupancy tracking",
+      "type": "object",
+      "properties": {
+        "count": { "type": "number" }
+      }
+    }
+  },
+  "firestore": {
+    "tables": {
+      "schema": "Table",
+      "description": "Dining tables collection"
+    },
+    "bookings": {
+      "schema": "Booking",
+      "description": "Reservations collection"
+    },
+    "customers": {
+      "schema": "Customer",
+      "description": "Customers history database"
+    },
+    "settings": {
+      "schema": "Settings",
+      "description": "Global settings document"
+    },
+    "settings_secure": {
+      "schema": "SecurePins",
+      "description": "Secure configurations such as PINs"
+    },
+    "slot_occupancy": {
+      "schema": "SlotOccupancy",
+      "description": "Tracks seating limits per Kalyana Virundhu slot"
+    }
+  }
+}

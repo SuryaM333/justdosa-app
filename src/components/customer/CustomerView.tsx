@@ -756,19 +756,19 @@ export const CustomerView: React.FC = () => {
                   <span>💾</span> Keep Your Booking Link Safe
                 </span>
                 <p className="text-[11px] text-[#B8ACA0] leading-relaxed">
-                  Send this link to yourself on WhatsApp so you can easily view, change, or track your booking status anytime!
+                  Save this link on WhatsApp so you can easily view, change, or track your booking status anytime!
                 </p>
                 <button
                   onClick={() => {
                     const uniqueLink = `${window.location.origin}?bookingId=${activeBooking.id}`;
-                    const text = `Here is my Just Dosa booking link to view or manage my reservation:\n${uniqueLink}`;
+                    const text = `My Just Dosa booking: ${uniqueLink}`;
                     const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
                     window.open(waUrl, '_blank');
                   }}
-                  className="w-full py-2.5 px-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                  className="w-full py-2.5 px-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer"
                 >
                   <ExternalLink className="w-4 h-4" />
-                  <span>Send Link to My WhatsApp</span>
+                  <span>Save my booking link</span>
                 </button>
               </div>
 

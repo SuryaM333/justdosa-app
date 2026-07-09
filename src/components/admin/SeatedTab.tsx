@@ -100,6 +100,26 @@ export const SeatedTab: React.FC<SeatedTabProps> = ({ bookings, tables, onRefres
                         <span className="text-[11px] text-[#6B5E4C] dark:text-[#B8ACA0] font-medium">
                           {table ? table.name : `Table ${booking.tableId}`} ({table?.capacity || 6} seats)
                         </span>
+
+                        <div className="flex items-center gap-1.5 mt-1 text-[11px]">
+                          <span className="text-zinc-500">Server:</span>
+                          <select
+                            disabled={!isOnline}
+                            value={table?.assignedServer || ''}
+                            onChange={(e) => {
+                              if (booking.tableId) {
+                                dataService.assignServerToTable(booking.tableId, e.target.value || null);
+                                onRefresh();
+                              }
+                            }}
+                            className="bg-[#F5F2EA] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] rounded-md py-0.5 px-1.5 text-[11px] font-semibold text-[#8B4513] dark:text-[#D2B48C] focus:outline-none cursor-pointer disabled:opacity-50"
+                          >
+                            <option value="">Unassigned</option>
+                            {dataService.getStaffList().map((staff) => (
+                              <option key={staff} value={staff}>{staff}</option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
                     </div>
 

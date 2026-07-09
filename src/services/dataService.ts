@@ -20,17 +20,10 @@ import { hashPin } from '../utils/crypto';
 // ----------------------------------------------------
 // FIREBASE FIRESTORE INITIALIZATION
 // ----------------------------------------------------
-const firebaseConfig = {
-  apiKey: "AIzaSyDOUFuzmLPwJUjoRFagzlHGOVg9hLu9enY",
-  authDomain: "just-dosa.firebaseapp.com",
-  projectId: "just-dosa",
-  storageBucket: "just-dosa.firebasestorage.app",
-  messagingSenderId: "476516299106",
-  appId: "1:476516299106:web:718797bbfe16d576dbfc3b"
-};
+import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
 // ----------------------------------------------------
 // FIRESTORE ERROR HANDLING (Spec compliant)
@@ -778,6 +771,46 @@ export const dataService = {
     }
   },
 
+  async mergeTables(tableId1: number, tableId2: number) {
+    try {
+      const table1Ref = doc(db, 'tables', tableId1.toString());
+      const table2Ref = doc(db, 'tables', tableId2.toString());
+      
+      await safeRunTransaction(db, async (transaction) => {
+        const snap1 = await transaction.get(table1Ref);
+        const snap2 = await transaction.get(table2Ref);
+        
+        if (!snap1.exists() || !snap2.exists()) return;
+        
+        transaction.update(table1Ref, { mergedWith: tableId2 });
+        transaction.update(table2Ref, { mergedWith: tableId1 });
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `tables/merge/${tableId1}_${tableId2}`);
+    }
+  },
+
+  async dissolveMerge(tableId: number) {
+    try {
+      const tableRef = doc(db, 'tables', tableId.toString());
+      const tableSnap = await getDoc(tableRef);
+      if (!tableSnap.exists()) return;
+      
+      const table = tableSnap.data() as Table;
+      const otherId = table.mergedWith;
+      
+      await safeRunTransaction(db, async (transaction) => {
+        transaction.update(tableRef, { mergedWith: deleteField() });
+        if (otherId) {
+          const otherRef = doc(db, 'tables', otherId.toString());
+          transaction.update(otherRef, { mergedWith: deleteField() });
+        }
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `tables/dissolve/${tableId}`);
+    }
+  },
+
   async createBooking(data: {
     firstName: string;
     lastName: string;
@@ -1233,10 +1266,17 @@ export const dataService = {
         }
 
         const requiredSeats = getRequiredTableSeats(booking);
-        if (requiredSeats > table.maxOverrideCapacity) {
+        let maxCap = table.maxOverrideCapacity;
+        if (table.mergedWith) {
+          const otherTable = cachedTables.find((t) => t.id === table.mergedWith);
+          if (otherTable) {
+            maxCap = table.capacity + otherTable.capacity;
+          }
+        }
+        if (requiredSeats > maxCap) {
           return { 
             success: false, 
-            error: `Party of ${booking.partySize} (${requiredSeats} required table seats) exceeds Table ${tableId} maximum capacity (${table.maxOverrideCapacity})` 
+            error: `Party of ${booking.partySize} (${requiredSeats} required table seats) exceeds Table ${tableId} combined maximum capacity (${maxCap})` 
           };
         }
 
@@ -1244,6 +1284,14 @@ export const dataService = {
           isOccupied: true,
           currentBookingId: booking.id
         }));
+
+        if (table.mergedWith) {
+          const otherDocRef = doc(db, 'tables', table.mergedWith.toString());
+          transaction.update(otherDocRef, sanitizeData({
+            isOccupied: true,
+            currentBookingId: booking.id
+          }));
+        }
 
         transaction.update(bookingDocRef, sanitizeData({
           status: 'seated',
@@ -1321,8 +1369,18 @@ export const dataService = {
 
       await safeSetDoc(tableDocRef, {
         isOccupied: false,
-        currentBookingId: null
+        currentBookingId: null,
+        mergedWith: deleteField()
       }, { merge: true });
+
+      if (table.mergedWith) {
+        const otherRef = doc(db, 'tables', table.mergedWith.toString());
+        await safeSetDoc(otherRef, {
+          isOccupied: false,
+          currentBookingId: null,
+          mergedWith: deleteField()
+        }, { merge: true });
+      }
 
       await this.updateAllWaitingEstimates();
       await this.syncSlotOccupancyForBookingId(bookingId);
@@ -1384,8 +1442,18 @@ export const dataService = {
           const tableDocRef = doc(db, 'tables', table.id.toString());
           await safeSetDoc(tableDocRef, {
             isOccupied: false,
-            currentBookingId: null
+            currentBookingId: null,
+            mergedWith: deleteField()
           }, { merge: true });
+
+          if (table.mergedWith) {
+            const otherRef = doc(db, 'tables', table.mergedWith.toString());
+            await safeSetDoc(otherRef, {
+              isOccupied: false,
+              currentBookingId: null,
+              mergedWith: deleteField()
+            }, { merge: true });
+          }
         }
 
         await this.syncSlotOccupancyForBookingId(booking.id);
