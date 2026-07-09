@@ -223,6 +223,18 @@ export const WaitingListTab: React.FC<WaitingListTabProps> = ({
                         {booking.firstName} {booking.lastName}
                       </span>
                       {getCustomerBadge(booking.phone)}
+                      {(() => {
+                        const customerProfile = dataService.getCustomerByPhone(booking.phone);
+                        if (customerProfile?.isVip) {
+                          return (
+                            <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] font-black bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-600 text-white shadow-md shadow-amber-500/20 animate-pulse">
+                              <Sparkles className="w-2.5 h-2.5" />
+                              <span>★ VIP</span>
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
                       {alertBadge}
                     </div>
 
@@ -246,6 +258,50 @@ export const WaitingListTab: React.FC<WaitingListTabProps> = ({
                         <span>Waited: <strong className="text-zinc-950 dark:text-white bg-amber-100/60 dark:bg-amber-950/40 px-2 py-0.5 rounded border border-amber-200/50 dark:border-amber-900/40 font-bold">{getWaitedTime(booking.createdAt)}</strong></span>
                       </div>
                     </div>
+
+                    {(booking.allergies || booking.notes) && (
+                      <div className="mt-2.5 space-y-1 bg-amber-500/5 dark:bg-amber-500/0 p-2.5 rounded-xl border border-dashed border-amber-500/20 max-w-lg">
+                        {booking.allergies && (
+                          <div className="text-[11px] font-semibold text-rose-700 dark:text-rose-400">
+                            ⚠️ <strong className="font-bold">Allergies/Pref:</strong> {booking.allergies}
+                          </div>
+                        )}
+                        {booking.notes && (
+                          <div className="text-[11px] font-semibold text-[#6B5E4C] dark:text-[#B8ACA0]">
+                            📝 <strong className="font-bold">Notes:</strong> {booking.notes}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {(() => {
+                      const customerProfile = dataService.getCustomerByPhone(booking.phone);
+                      if (customerProfile && (customerProfile.isVip || customerProfile.allergies || customerProfile.notes)) {
+                        return (
+                          <div className="mt-2 space-y-1 bg-amber-500/5 dark:bg-[#26221E]/60 p-2.5 rounded-xl border border-[#D2B48C]/30 text-[11px] max-w-lg">
+                            <div className="font-bold text-[#E37A08] flex items-center gap-1 mb-1">
+                              <span>★</span> CRM Guest Profile:
+                            </div>
+                            {customerProfile.isVip && (
+                              <div className="text-amber-600 dark:text-amber-400 font-bold">
+                                • Designated VIP Guest
+                              </div>
+                            )}
+                            {customerProfile.allergies && (
+                              <div className="text-rose-700 dark:text-rose-400 font-semibold">
+                                • Profile Allergy Tag: {customerProfile.allergies}
+                              </div>
+                            )}
+                            {customerProfile.notes && (
+                              <div className="text-[#6B5E4C] dark:text-[#B8ACA0] font-medium italic">
+                                • Profile Staff Note: "{customerProfile.notes}"
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
                 </div>
 
@@ -255,25 +311,33 @@ export const WaitingListTab: React.FC<WaitingListTabProps> = ({
                   <div className="flex items-center gap-2">
                     {/* Quick Seat Button */}
                     <button
+                      disabled={!isOnline}
                       onClick={() => setQuickSeatBooking(booking)}
-                      className="px-3 py-2 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] hover:bg-[#E8E2D2] dark:hover:bg-[#3D352E] text-[#2D2926] dark:text-[#D2B48C] text-xs font-semibold transition-colors flex items-center gap-1 border border-[#E8E2D2] dark:border-[#3D352E]"
-                      title="Quick Seat to table without floor plan"
+                      className={`px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1 border border-[#E8E2D2] dark:border-[#3D352E] ${
+                        !isOnline
+                          ? 'bg-zinc-100 dark:bg-zinc-850 text-zinc-400 cursor-not-allowed border-zinc-200 dark:border-zinc-800'
+                          : 'bg-[#F5F2EA] dark:bg-[#1C1917] hover:bg-[#E8E2D2] dark:hover:bg-[#3D352E] text-[#2D2926] dark:text-[#D2B48C]'
+                      }`}
+                      title={isOnline ? "Quick Seat to table without floor plan" : "No connection"}
                     >
-                      <span>Quick Seat</span>
+                      <span>{isOnline ? 'Quick Seat' : 'No connection'}</span>
                       <ChevronDown className="w-3.5 h-3.5" />
                     </button>
 
                     {/* Select for Floor Plan Seating */}
                     <button
+                      disabled={!isOnline}
                       onClick={() => onSelectWaitingBooking(isSelected ? null : booking)}
                       className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm ${
-                        isSelected
-                          ? 'bg-[#8B4513] text-white shadow-[#8B4513]/30 animate-pulse'
-                          : 'bg-[#E37A08] text-white hover:bg-[#c96906]'
+                        !isOnline
+                          ? 'bg-zinc-100 dark:bg-zinc-850 text-zinc-400 cursor-not-allowed border border-zinc-200 dark:border-zinc-800'
+                          : isSelected
+                            ? 'bg-[#8B4513] text-white shadow-[#8B4513]/30 animate-pulse'
+                            : 'bg-[#E37A08] text-white hover:bg-[#c96906]'
                       }`}
                     >
                       <UserCheck className="w-3.5 h-3.5" />
-                      <span>{isSelected ? 'Selected (Tap Table ▲)' : 'Select to Seat'}</span>
+                      <span>{!isOnline ? 'No connection' : isSelected ? 'Selected (Tap Table ▲)' : 'Select to Seat'}</span>
                     </button>
 
                     {/* Cancel button */}
@@ -315,12 +379,14 @@ export const WaitingListTab: React.FC<WaitingListTabProps> = ({
                   return (
                     <button
                       key={t.id}
-                      disabled={!canFit}
+                      disabled={!canFit || !isOnline}
                       onClick={() => handleQuickSeatTable(t.id)}
                       className={`p-3 rounded-xl border text-left flex items-center justify-between ${
-                        !canFit
-                          ? 'border-[#E8E2D2] dark:border-[#3D352E] bg-[#F5F2EA] dark:bg-[#1C1917] text-[#6B5E4C] cursor-not-allowed opacity-60'
-                          : 'border-emerald-300 dark:border-emerald-700/60 bg-emerald-50/50 dark:bg-emerald-950/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 text-emerald-900 dark:text-emerald-200 font-semibold'
+                        !isOnline
+                          ? 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-zinc-400 cursor-not-allowed opacity-60'
+                          : !canFit
+                            ? 'border-[#E8E2D2] dark:border-[#3D352E] bg-[#F5F2EA] dark:bg-[#1C1917] text-[#6B5E4C] cursor-not-allowed opacity-60'
+                            : 'border-emerald-300 dark:border-emerald-700/60 bg-emerald-50/50 dark:bg-emerald-950/30 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 text-emerald-900 dark:text-emerald-200 font-semibold'
                       }`}
                     >
                       <div>

@@ -14,6 +14,9 @@ export interface Customer {
   cancellationCount?: number;
   whatsappOptIn: boolean;
   branchId?: string;
+  isVip?: boolean;
+  notes?: string;
+  allergies?: string;
 }
 
 export interface Booking {
@@ -49,6 +52,9 @@ export interface Booking {
   alternativeIsKalyana?: boolean;
   alternativeKalyanaSlot?: string;
   proposalNote?: string;
+  notes?: string;
+  allergies?: string;
+  serverName?: string;
 }
 
 export interface Table {
@@ -61,6 +67,7 @@ export interface Table {
   currentBookingId?: string;
   orderingUrl?: string; // For table QR ordering handoff
   branchId?: string;
+  assignedServer?: string;
   position: {
     column: 'left' | 'middle' | 'right' | 'top';
     order: number;

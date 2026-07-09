@@ -96,8 +96,7 @@ export const TimeWheelPicker: React.FC<TimeWheelPickerProps> = ({
   onChange,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const isProgrammaticScroll = useRef(false);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [scrollTop, setScrollTop] = useState(0);
 
   const ITEM_HEIGHT = 44; // Perfect large touch targets (at least 44px for mobile/tablet)
   const VISIBLE_ITEMS = 5; // 5 items visible: 2 top, 1 middle, 2 bottom
@@ -107,33 +106,23 @@ export const TimeWheelPicker: React.FC<TimeWheelPickerProps> = ({
   const selectedIndex = slots.findIndex((s) => s.value === selectedValue);
   const activeIndex = selectedIndex >= 0 ? selectedIndex : 0;
 
-  // Sync scroll position with activeIndex
+  // Sync scroll position with external activeIndex changes
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const targetScrollTop = activeIndex * ITEM_HEIGHT;
-    if (Math.abs(container.scrollTop - targetScrollTop) > 1) {
-      isProgrammaticScroll.current = true;
-      container.scrollTo({
-        top: targetScrollTop,
-        behavior: 'smooth',
-      });
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      timeoutRef.current = setTimeout(() => {
-        isProgrammaticScroll.current = false;
-      }, 300);
+    if (Math.abs(container.scrollTop - targetScrollTop) > 1.5) {
+      container.scrollTop = targetScrollTop;
+      setScrollTop(targetScrollTop);
     }
   }, [selectedValue, activeIndex, slots]);
 
-  const handleScroll = () => {
-    const container = containerRef.current;
-    if (!container) return;
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const target = e.currentTarget;
+    setScrollTop(target.scrollTop);
 
-    if (isProgrammaticScroll.current) return;
-
-    const scrollTop = container.scrollTop;
-    const computedIndex = Math.round(scrollTop / ITEM_HEIGHT);
+    const computedIndex = Math.round(target.scrollTop / ITEM_HEIGHT);
     const clampedIndex = Math.max(0, Math.min(slots.length - 1, computedIndex));
 
     if (slots[clampedIndex] && slots[clampedIndex].value !== selectedValue) {
@@ -145,17 +134,10 @@ export const TimeWheelPicker: React.FC<TimeWheelPickerProps> = ({
     const container = containerRef.current;
     if (!container) return;
 
-    isProgrammaticScroll.current = true;
     container.scrollTo({
       top: index * ITEM_HEIGHT,
       behavior: 'smooth',
     });
-    onChange(slots[index].value);
-
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    timeoutRef.current = setTimeout(() => {
-      isProgrammaticScroll.current = false;
-    }, 300);
   };
 
   if (slots.length === 0) {
@@ -167,7 +149,7 @@ export const TimeWheelPicker: React.FC<TimeWheelPickerProps> = ({
   }
 
   return (
-    <div className="relative w-full max-w-xs mx-auto overflow-hidden rounded-2xl border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#1C1917]/40 shadow-inner">
+    <div className="relative w-full max-w-xs mx-auto overflow-hidden rounded-2xl border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#1C1917]/40 shadow-inner select-none">
       <style>{`
         .scrollbar-none::-webkit-scrollbar {
           display: none;
@@ -180,17 +162,17 @@ export const TimeWheelPicker: React.FC<TimeWheelPickerProps> = ({
 
       {/* 3D cylindrical fade effect */}
       <div 
-        className="absolute inset-x-0 top-0 pointer-events-none z-10 bg-gradient-to-b from-white via-white/35 to-transparent dark:from-[#1C1917] dark:via-[#1C1917]/35 dark:to-transparent" 
+        className="absolute inset-x-0 top-0 pointer-events-none z-10 bg-gradient-to-b from-white via-white/40 to-transparent dark:from-[#1C1917] dark:via-[#1C1917]/40 dark:to-transparent" 
         style={{ height: `${PADDING_HEIGHT}px` }}
       />
       <div 
-        className="absolute inset-x-0 bottom-0 pointer-events-none z-10 bg-gradient-to-t from-white via-white/35 to-transparent dark:from-[#1C1917] dark:via-[#1C1917]/35 dark:to-transparent" 
+        className="absolute inset-x-0 bottom-0 pointer-events-none z-10 bg-gradient-to-t from-white via-white/40 to-transparent dark:from-[#1C1917] dark:via-[#1C1917]/40 dark:to-transparent" 
         style={{ height: `${PADDING_HEIGHT}px` }}
       />
 
       {/* Brand orange selection overlay highlight */}
       <div 
-        className="absolute inset-x-2 border-y-2 border-[#E37A08] bg-[#E37A08]/5 pointer-events-none z-10 rounded-md"
+        className="absolute inset-x-2 border-y border-[#E37A08]/40 bg-[#E37A08]/5 pointer-events-none z-10 rounded-lg"
         style={{ 
           top: `${PADDING_HEIGHT}px`, 
           height: `${ITEM_HEIGHT}px` 
@@ -210,22 +192,28 @@ export const TimeWheelPicker: React.FC<TimeWheelPickerProps> = ({
       >
         {slots.map((slot, idx) => {
           const isSelected = selectedValue === slot.value;
-          const distance = Math.abs(idx - activeIndex);
-          const opacity = distance === 0 ? 1 : distance === 1 ? 0.65 : distance === 2 ? 0.3 : 0.1;
-          const scale = distance === 0 ? 1.08 : distance === 1 ? 0.95 : distance === 2 ? 0.85 : 0.75;
+          
+          // Continuous distance calculation for smooth physical feel during scrolling
+          const itemScrollTop = idx * ITEM_HEIGHT;
+          const distanceFromCenter = Math.abs(scrollTop - itemScrollTop);
+          const ratio = Math.min(distanceFromCenter / (ITEM_HEIGHT * 2.2), 1); // 0 at center, 1 at edges
+
+          const opacity = 1 - ratio * 0.75; // 1.0 down to 0.25
+          const scale = 1 - ratio * 0.2; // 1.0 down to 0.8
+          const rotateX = ratio * 50 * (scrollTop > itemScrollTop ? 1 : -1); // 3D rotate cylinder effect
 
           return (
             <div
               key={slot.value}
               onClick={() => handleItemClick(idx)}
-              className="snap-center flex items-center justify-center cursor-pointer select-none transition-all duration-150"
+              className="snap-center flex items-center justify-center cursor-pointer select-none transition-transform duration-75 text-center"
               style={{ 
                 height: `${ITEM_HEIGHT}px`,
-                opacity: opacity,
-                transform: `scale(${scale})`
+                transform: `perspective(220px) rotateX(${rotateX}deg) scale(${scale})`,
+                opacity: opacity
               }}
             >
-              <span className={`text-sm font-mono font-bold tracking-wide ${isSelected ? 'text-[#E37A08] font-black' : 'text-[#6B5E4C] dark:text-[#B8ACA0]'}`}>
+              <span className={`text-sm font-mono font-bold tracking-wide ${isSelected ? 'text-[#E37A08] dark:text-amber-500 scale-105 font-black' : 'text-[#6B5E4C] dark:text-[#B8ACA0]'}`}>
                 {slot.timeString}
               </span>
             </div>

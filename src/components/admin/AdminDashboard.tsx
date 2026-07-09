@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Users, Calendar, Utensils, UserCheck, BarChart3, Bell, LayoutGrid, RotateCcw, Volume2, Settings as SettingsIcon } from 'lucide-react';
 import { AdminTab, Booking, Customer, Table, AdminRole } from '../../types';
 import { dataService } from '../../services/dataService';
@@ -25,6 +25,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole, onRes
   const [selectedWaitingBooking, setSelectedWaitingBooking] = useState<Booking | null>(null);
   const [showFloorPlan, setShowFloorPlan] = useState(true);
   const [isNewBookingOpen, setIsNewBookingOpen] = useState(false);
+  const [isOnline, setIsOnline] = useState(dataService.isOnline());
+  const [toast, setToast] = useState<string | null>(null);
+
+  const prevPendingIdsRef = useRef<string[]>([]);
+
+  // Real-time tab title badge count (e.g. "(3) Just Dosa") & Sound/vibration chime
+  useEffect(() => {
+    const currentPending = bookings.filter((b) => b.status === 'pending');
+    const currentPendingIds = currentPending.map((b) => b.id);
+    const prevPendingIds = prevPendingIdsRef.current;
+
+    // Badge count in title
+    if (currentPending.length > 0) {
+      document.title = `(${currentPending.length}) Just Dosa`;
+    } else {
+      document.title = 'Just Dosa';
+    }
+
+    // New booking check
+    const hasNewPending = currentPendingIds.some((id) => !prevPendingIds.includes(id));
+    if (hasNewPending && prevPendingIds.length > 0) {
+      playNewBookingChime();
+    }
+
+    prevPendingIdsRef.current = currentPendingIds;
+  }, [bookings]);
 
   const loadData = () => {
     setTables(dataService.getTables());
@@ -36,6 +62,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole, onRes
     loadData();
     const unsubscribe = dataService.subscribe(() => {
       loadData();
+      const onlineStatus = dataService.isOnline();
+      setIsOnline((prev) => {
+        if (!prev && onlineStatus) {
+          setToast("Back online");
+          setTimeout(() => setToast(null), 3000);
+        }
+        return onlineStatus;
+      });
     });
     const intervalId = setInterval(() => {
       loadData();
@@ -44,6 +78,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole, onRes
       unsubscribe();
       clearInterval(intervalId);
     };
+  }, []);
+
+  useEffect(() => {
+    // Run auto-finish rollover check on mount (delayed to allow initial cache populating)
+    const runRollover = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const clearedCount = await dataService.autoFinishPreviousDaySeatedParties();
+      if (clearedCount > 0) {
+        setToast(`Cleared ${clearedCount} table${clearedCount > 1 ? 's' : ''} from yesterday.`);
+        setTimeout(() => setToast(null), 5000);
+      }
+    };
+    runRollover();
+
+    // Check at midnight
+    const now = new Date();
+    const midnight = new Date();
+    midnight.setHours(24, 0, 0, 0);
+    const msUntilMidnight = midnight.getTime() - now.getTime();
+
+    const checkAtMidnight = setTimeout(async () => {
+      const clearedCount = await dataService.autoFinishPreviousDaySeatedParties();
+      if (clearedCount > 0) {
+        setToast(`Cleared ${clearedCount} table${clearedCount > 1 ? 's' : ''} from yesterday.`);
+        setTimeout(() => setToast(null), 5000);
+      }
+    }, msUntilMidnight);
+
+    return () => clearTimeout(checkAtMidnight);
   }, []);
 
   // When switching to waiting or booked tabs, clear unread new badges
@@ -76,6 +139,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole, onRes
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-[#FFFDF7] dark:bg-[#1C1917] py-6 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto space-y-6">
+        {/* Offline Connection Banner */}
+        {!isOnline && (
+          <div className="bg-amber-600 dark:bg-amber-700 text-white px-4 py-3 rounded-2xl flex items-center justify-between shadow-md animate-pulse">
+            <div className="flex items-center gap-2.5">
+              <span className="w-2.5 h-2.5 bg-white rounded-full animate-ping shrink-0" />
+              <span className="text-sm font-semibold tracking-wide">
+                Reconnecting… Live updates are paused and administrative actions are restricted.
+              </span>
+            </div>
+            <span className="text-xs font-mono opacity-80 shrink-0">No Connection</span>
+          </div>
+        )}
+
         {/* Admin Header & Welcome */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E8E2D2] dark:border-[#3D352E]">
           <div>
@@ -297,6 +373,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole, onRes
         customers={customers}
         bookings={bookings}
       />
+
+      {/* Toast Notification overlay */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-[#2D2926] text-[#FFFDF7] px-5 py-3 rounded-2xl border border-[#E8E2D2]/20 shadow-xl flex items-center gap-3 animate-bounce">
+          <div className="w-2 h-2 rounded-full bg-[#E37A08] animate-ping" />
+          <span className="text-sm font-medium tracking-wide">{toast}</span>
+        </div>
+      )}
     </div>
   );
 };

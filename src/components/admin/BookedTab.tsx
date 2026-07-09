@@ -14,6 +14,7 @@ interface BookedTabProps {
 
 export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRefresh, onOpenNewBooking }) => {
   const [dateFilter, setDateFilter] = React.useState<'upcoming' | 'today' | 'all'>('upcoming');
+  const isOnline = dataService.isOnline();
 
   const getTodayStr = () => {
     const d = new Date();
@@ -378,6 +379,18 @@ export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRef
                           {booking.firstName} {booking.lastName}
                         </span>
                         {getCustomerBadge(booking.phone)}
+                        {(() => {
+                          const customerProfile = dataService.getCustomerByPhone(booking.phone);
+                          if (customerProfile?.isVip) {
+                            return (
+                              <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] font-black bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-600 text-white shadow-md shadow-amber-500/20 animate-pulse">
+                                <Sparkles className="w-2.5 h-2.5" />
+                                <span>★ VIP</span>
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
                         {booking.source === 'phone/staff' && (
                           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 shadow-xs" title="Manual Staff Booking">
                             <Phone className="w-3 h-3 text-blue-600 dark:text-blue-400" />
@@ -454,6 +467,50 @@ export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRef
                           </div>
                         </div>
                       )}
+
+                      {(booking.allergies || booking.notes) && (
+                        <div className="mt-2 space-y-1 bg-amber-500/5 dark:bg-amber-500/0 p-2.5 rounded-xl border border-dashed border-amber-500/20">
+                          {booking.allergies && (
+                            <div className="text-[11px] font-semibold text-rose-700 dark:text-rose-400">
+                              ⚠️ <strong className="font-bold">Allergies/Pref:</strong> {booking.allergies}
+                            </div>
+                          )}
+                          {booking.notes && (
+                            <div className="text-[11px] font-semibold text-[#6B5E4C] dark:text-[#B8ACA0]">
+                              📝 <strong className="font-bold">Notes:</strong> {booking.notes}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {(() => {
+                        const customerProfile = dataService.getCustomerByPhone(booking.phone);
+                        if (customerProfile && (customerProfile.isVip || customerProfile.allergies || customerProfile.notes)) {
+                          return (
+                            <div className="mt-2 space-y-1 bg-amber-500/5 dark:bg-[#26221E]/60 p-2.5 rounded-xl border border-[#D2B48C]/30 text-[11px]">
+                              <div className="font-bold text-[#E37A08] flex items-center gap-1 mb-1">
+                                <span>★</span> CRM Guest Profile:
+                              </div>
+                              {customerProfile.isVip && (
+                                <div className="text-amber-600 dark:text-amber-400 font-bold">
+                                  • Designated VIP Guest
+                                </div>
+                              )}
+                              {customerProfile.allergies && (
+                                <div className="text-rose-700 dark:text-rose-400 font-semibold">
+                                  • Profile Allergy Tag: {customerProfile.allergies}
+                                </div>
+                              )}
+                              {customerProfile.notes && (
+                                <div className="text-[#6B5E4C] dark:text-[#B8ACA0] font-medium italic">
+                                  • Profile Staff Note: "{customerProfile.notes}"
+                                </div>
+                              )}
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
                   </div>
 
@@ -462,13 +519,19 @@ export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRef
                     {isPending && (
                       <>
                         <button
+                          disabled={!isOnline}
                           onClick={() => handleConfirm(booking.id)}
-                          className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all shadow-md flex items-center gap-1.5"
+                          className={`px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 ${
+                            !isOnline
+                              ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed border border-zinc-200 dark:border-zinc-750'
+                              : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          }`}
                         >
                           <CheckCircle className="w-3.5 h-3.5" />
-                          <span>Confirm</span>
+                          <span>{isOnline ? 'Confirm' : 'No connection'}</span>
                         </button>
                         <button
+                          disabled={!isOnline}
                           onClick={() => {
                             setProposingAltBookingId(booking.id);
                             setAltDate(booking.bookingDate || '');
@@ -477,17 +540,26 @@ export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRef
                             setAltKalyanaSlot(booking.kalyanaSlot || dataService.getKalyanaSlots()[0]?.range || 'Slot 1: 11:00am-12:30pm');
                             setAltNote('');
                           }}
-                          className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold transition-all shadow-md flex items-center gap-1.5"
+                          className={`px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 ${
+                            !isOnline
+                              ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed border border-zinc-200 dark:border-zinc-750'
+                              : 'bg-amber-500 hover:bg-amber-600 text-white'
+                          }`}
                         >
                           <Clock className="w-3.5 h-3.5" />
-                          <span>Propose Alt Time</span>
+                          <span>{isOnline ? 'Propose Alt Time' : 'No connection'}</span>
                         </button>
                         <button
+                          disabled={!isOnline}
                           onClick={() => handleDecline(booking.id)}
-                          className="px-3 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-md flex items-center gap-1.5"
+                          className={`px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 ${
+                            !isOnline
+                              ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed border border-zinc-200 dark:border-zinc-750'
+                              : 'bg-rose-600 hover:bg-rose-700 text-white'
+                          }`}
                         >
                           <XCircle className="w-3.5 h-3.5" />
-                          <span>Decline Outright</span>
+                          <span>{isOnline ? 'Decline Outright' : 'No connection'}</span>
                         </button>
                       </>
                     )}
@@ -495,19 +567,29 @@ export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRef
                     {isConfirmed && (
                       <>
                         <button
+                          disabled={!isOnline}
                           onClick={() => handleNoShow(booking.id)}
-                          className="px-3 py-2 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] hover:bg-[#EF4444]/10 text-[#6B5E4C] dark:text-[#B8ACA0] hover:text-[#EF4444] text-xs font-semibold transition-colors flex items-center gap-1 border border-[#E8E2D2] dark:border-[#3D352E]"
+                          className={`px-3 py-2 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1 border ${
+                            !isOnline
+                              ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed border-zinc-200 dark:border-zinc-750'
+                              : 'bg-[#F5F2EA] dark:bg-[#1C1917] hover:bg-[#EF4444]/10 text-[#6B5E4C] dark:text-[#B8ACA0] hover:text-[#EF4444] border-[#E8E2D2] dark:border-[#3D352E]'
+                          }`}
                         >
                           <XCircle className="w-3.5 h-3.5" />
-                          <span>No-Show</span>
+                          <span>{isOnline ? 'No-Show' : 'No connection'}</span>
                         </button>
 
                         <button
+                          disabled={!isOnline}
                           onClick={() => handleArrived(booking.id)}
-                          className="px-3 py-2 rounded-xl bg-[#E37A08] hover:bg-[#c96906] text-white text-xs font-bold transition-all shadow-md shadow-[#E37A08]/20 flex items-center gap-1.5 active:scale-95"
+                          className={`px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 active:scale-95 ${
+                            !isOnline
+                              ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed border border-zinc-200 dark:border-zinc-750'
+                              : 'bg-[#E37A08] hover:bg-[#c96906] text-white shadow-[#E37A08]/20'
+                          }`}
                         >
                           <CheckCircle className="w-3.5 h-3.5" />
-                          <span>Arrived → Queue</span>
+                          <span>{isOnline ? 'Arrived → Queue' : 'No connection'}</span>
                         </button>
                       </>
                     )}

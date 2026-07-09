@@ -136,6 +136,7 @@ let cachedPins = {
   staffPinHash: 'f3e055913a0b1eb0f07317896f9a1bc466b9a50db85a7f882f3ffde9ffb23aca',
   ownerPinHash: 'a1fb4e703a9ef1fa4936801721ff285a97ac85330856674412e054892afe6972',
 };
+let isFirestoreOnline = true;
 
 type Listener = () => void;
 const listeners: Set<Listener> = new Set();
@@ -145,6 +146,18 @@ function notifyListeners() {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('justDosaDataChange'));
   }
+}
+
+if (typeof window !== 'undefined') {
+  isFirestoreOnline = navigator.onLine;
+  window.addEventListener('online', () => {
+    isFirestoreOnline = true;
+    notifyListeners();
+  });
+  window.addEventListener('offline', () => {
+    isFirestoreOnline = false;
+    notifyListeners();
+  });
 }
 
 // ----------------------------------------------------
@@ -186,7 +199,8 @@ const DEFAULT_SETTINGS = {
     low: 10,
     medium: 15,
     high: 20
-  }
+  },
+  staffList: ['Amrit', 'Sanjay', 'Vasu']
 };
 
 const INITIAL_TABLES: Table[] = [
@@ -378,6 +392,10 @@ export const dataService = {
     return () => {
       listeners.delete(listener);
     };
+  },
+
+  isOnline(): boolean {
+    return isFirestoreOnline;
   },
 
   getStaffPin(): string {
@@ -622,6 +640,7 @@ export const dataService = {
         proposalNote: proposalNote || null,
         isNewAlert: false
       }, { merge: true });
+      await this.syncSlotOccupancyForBookingId(bookingId);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
     }
@@ -642,6 +661,7 @@ export const dataService = {
           alternativeDate: null,
           alternativeTime: null
         }, { merge: true });
+        await this.syncSlotOccupancyForBookingId(bookingId);
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
@@ -653,6 +673,7 @@ export const dataService = {
       await safeSetDoc(doc(db, 'bookings', bookingId), {
         status: 'cancelled'
       }, { merge: true });
+      await this.syncSlotOccupancyForBookingId(bookingId);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
     }
@@ -709,9 +730,52 @@ export const dataService = {
     }
   },
 
+  async updateCustomer(phoneKey: string, updates: Partial<Customer>) {
+    try {
+      const cleaned = cleanPhoneNumber(phoneKey);
+      await setDoc(doc(db, 'customers', cleaned), updates, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'customers');
+    }
+  },
+
   getCustomerByPhone(phone: string): Customer | null {
     const cleaned = cleanPhoneNumber(phone);
     return cachedCustomers[cleaned] || null;
+  },
+
+  getStaffList(): string[] {
+    return cachedSettings?.staffList || ['Amrit', 'Sanjay', 'Vasu'];
+  },
+
+  async setStaffList(staffList: string[]) {
+    try {
+      await safeSetDoc(doc(db, 'settings', 'global'), { staffList }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  async assignServerToTable(tableId: number, serverName: string | null) {
+    try {
+      const tableDocRef = doc(db, 'tables', tableId.toString());
+      await safeSetDoc(tableDocRef, {
+        assignedServer: serverName || null
+      }, { merge: true });
+
+      // Also set on the current seated booking if table is occupied
+      const tableSnap = await getDoc(tableDocRef);
+      if (tableSnap.exists()) {
+        const table = tableSnap.data() as Table;
+        if (table.currentBookingId) {
+          await safeSetDoc(doc(db, 'bookings', table.currentBookingId), {
+            serverName: serverName || null
+          }, { merge: true });
+        }
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `tables/${tableId}`);
+    }
   },
 
   async createBooking(data: {
@@ -729,71 +793,179 @@ export const dataService = {
     bookingTime?: string;
     isKalyanaVirundhu?: boolean;
     kalyanaSlot?: string;
+    notes?: string;
+    allergies?: string;
   }): Promise<Booking> {
     const formattedPhone = formatAusMobile(data.phone);
     const cleanedPhone = cleanPhoneNumber(data.phone);
 
-    try {
-      let customer = cachedCustomers[cleanedPhone];
-      if (!customer) {
-        customer = {
+    const isKalyana = data.isKalyanaVirundhu && data.kalyanaSlot && data.bookingDate;
+
+    if (isKalyana) {
+      const slotOccupancyRef = doc(db, 'slot_occupancy', `${data.bookingDate}_${data.kalyanaSlot}`);
+      const bookingId = `bk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      let newBooking: Booking;
+
+      try {
+        await runTransaction(db, async (transaction) => {
+          const occupancySnap = await transaction.get(slotOccupancyRef);
+          let currentCount = 0;
+          if (occupancySnap.exists()) {
+            currentCount = occupancySnap.data().guestsCount || 0;
+          } else {
+            const activeBookings = cachedBookings.filter(b => 
+              b.bookingDate === data.bookingDate && 
+              b.isKalyanaVirundhu && 
+              b.kalyanaSlot === data.kalyanaSlot && 
+              ['pending', 'confirmed', 'booked'].includes(b.status)
+            );
+            currentCount = activeBookings.reduce((sum, b) => sum + (b.partySize || 0), 0);
+          }
+
+          const slotConfig = this.getKalyanaSlots().find(s => s.range === data.kalyanaSlot);
+          const capacity = slotConfig ? slotConfig.capacity : this.getKalyanaCapacity();
+
+          if (currentCount + data.partySize > capacity) {
+            throw new Error('SLOT_FULL');
+          }
+
+          const customerRef = doc(db, 'customers', cleanedPhone);
+          const customerSnap = await transaction.get(customerRef);
+          let customer: any;
+          if (!customerSnap.exists()) {
+            customer = {
+              phone: formattedPhone,
+              firstName: data.firstName,
+              lastName: data.lastName,
+              totalVisits: 0,
+              lastVisitDate: new Date().toISOString(),
+              noShowCount: 0,
+              cancellationCount: 0,
+              whatsappOptIn: data.whatsappOptIn,
+              branchId: 'millpark',
+              notes: data.notes || '',
+              allergies: data.allergies || '',
+            };
+          } else {
+            customer = customerSnap.data();
+            customer.firstName = data.firstName;
+            customer.lastName = data.lastName;
+            customer.whatsappOptIn = data.whatsappOptIn;
+            if (data.notes) customer.notes = data.notes;
+            if (data.allergies) customer.allergies = data.allergies;
+          }
+          transaction.set(customerRef, customer);
+
+          newBooking = {
+            id: bookingId,
+            phone: formattedPhone,
+            firstName: data.firstName,
+            lastName: data.lastName,
+            partySize: data.partySize,
+            childSeats: data.childSeats,
+            adultsCount: data.adultsCount,
+            childrenCount: data.childrenCount,
+            childrenHighChairs: data.childrenHighChairs,
+            whatsappOptIn: data.whatsappOptIn,
+            type: data.type,
+            status: data.type === 'walk-in' ? 'waiting' : 'pending',
+            createdAt: new Date().toISOString(),
+            bookingDate: data.bookingDate || null,
+            bookingTime: data.bookingTime || null,
+            isNewAlert: true,
+            branchId: 'millpark',
+            isKalyanaVirundhu: true,
+            kalyanaSlot: data.kalyanaSlot,
+            notes: data.notes || '',
+            allergies: data.allergies || '',
+          };
+
+          const bookingRef = doc(db, 'bookings', bookingId);
+          transaction.set(bookingRef, newBooking);
+
+          transaction.set(slotOccupancyRef, {
+            guestsCount: currentCount + data.partySize,
+            lastUpdated: new Date().toISOString()
+          });
+        });
+
+        playNewBookingChime();
+        return newBooking!;
+      } catch (error: any) {
+        if (error.message === 'SLOT_FULL') {
+          throw new Error('This slot just filled up — please pick another');
+        }
+        throw error;
+      }
+    } else {
+      try {
+        let customer = cachedCustomers[cleanedPhone];
+        if (!customer) {
+          customer = {
+            phone: formattedPhone,
+            firstName: data.firstName,
+            lastName: data.lastName,
+            totalVisits: 0,
+            lastVisitDate: new Date().toISOString(),
+            noShowCount: 0,
+            cancellationCount: 0,
+            whatsappOptIn: data.whatsappOptIn,
+            branchId: 'millpark',
+            notes: data.notes || '',
+            allergies: data.allergies || '',
+          };
+        } else {
+          customer.firstName = data.firstName;
+          customer.lastName = data.lastName;
+          customer.whatsappOptIn = data.whatsappOptIn;
+          if (data.notes) customer.notes = data.notes;
+          if (data.allergies) customer.allergies = data.allergies;
+          if (!customer.branchId) customer.branchId = 'millpark';
+        }
+        await safeSetDoc(doc(db, 'customers', cleanedPhone), customer);
+
+        const bookingId = `bk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+        const newBooking: Booking = {
+          id: bookingId,
           phone: formattedPhone,
           firstName: data.firstName,
           lastName: data.lastName,
-          totalVisits: 0,
-          lastVisitDate: new Date().toISOString(),
-          noShowCount: 0,
-          cancellationCount: 0,
+          partySize: data.partySize,
+          childSeats: data.childSeats,
+          adultsCount: data.adultsCount,
+          childrenCount: data.childrenCount,
+          childrenHighChairs: data.childrenHighChairs,
           whatsappOptIn: data.whatsappOptIn,
+          type: data.type,
+          status: data.type === 'walk-in' ? 'waiting' : 'pending',
+          createdAt: new Date().toISOString(),
+          bookingDate: data.type === 'walk-in' ? null : (data.bookingDate || null),
+          bookingTime: data.type === 'walk-in' ? null : (data.bookingTime || null),
+          isNewAlert: true,
           branchId: 'millpark',
+          isKalyanaVirundhu: data.isKalyanaVirundhu || null,
+          kalyanaSlot: data.kalyanaSlot || null,
+          notes: data.notes || '',
+          allergies: data.allergies || '',
         };
-      } else {
-        customer.firstName = data.firstName;
-        customer.lastName = data.lastName;
-        customer.whatsappOptIn = data.whatsappOptIn;
-        if (!customer.branchId) customer.branchId = 'millpark';
+
+        if (newBooking.type === 'walk-in') {
+          newBooking.estimatedWaitMinutes = this.calculateEstimatedWait(getRequiredTableSeats(newBooking));
+        }
+
+        await safeSetDoc(doc(db, 'bookings', bookingId), newBooking);
+
+        if (newBooking.status === 'waiting') {
+          await this.updateAllWaitingEstimates();
+        }
+
+        playNewBookingChime();
+
+        return newBooking;
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, 'bookings');
+        throw error;
       }
-      await safeSetDoc(doc(db, 'customers', cleanedPhone), customer);
-
-      const bookingId = `bk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-      const newBooking: Booking = {
-        id: bookingId,
-        phone: formattedPhone,
-        firstName: data.firstName,
-        lastName: data.lastName,
-        partySize: data.partySize,
-        childSeats: data.childSeats,
-        adultsCount: data.adultsCount,
-        childrenCount: data.childrenCount,
-        childrenHighChairs: data.childrenHighChairs,
-        whatsappOptIn: data.whatsappOptIn,
-        type: data.type,
-        status: data.type === 'walk-in' ? 'waiting' : 'pending',
-        createdAt: new Date().toISOString(),
-        bookingDate: data.type === 'walk-in' ? null : (data.bookingDate || null),
-        bookingTime: data.type === 'walk-in' ? null : (data.bookingTime || null),
-        isNewAlert: true,
-        branchId: 'millpark',
-        isKalyanaVirundhu: data.isKalyanaVirundhu || null,
-        kalyanaSlot: data.kalyanaSlot || null,
-      };
-
-      if (newBooking.type === 'walk-in') {
-        newBooking.estimatedWaitMinutes = this.calculateEstimatedWait(getRequiredTableSeats(newBooking));
-      }
-
-      await safeSetDoc(doc(db, 'bookings', bookingId), newBooking);
-
-      if (newBooking.status === 'waiting') {
-        await this.updateAllWaitingEstimates();
-      }
-
-      playNewBookingChime();
-
-      return newBooking;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'bookings');
-      throw error;
     }
   },
 
@@ -814,72 +986,181 @@ export const dataService = {
     kalyanaSlot?: string;
     status: 'confirmed' | 'waiting';
     source: 'phone/staff';
+    notes?: string;
+    allergies?: string;
   }): Promise<Booking> {
-    try {
-      const cleanedPhone = data.phone ? cleanPhoneNumber(data.phone) : '';
-      const formattedPhone = cleanedPhone ? formatAusMobile(data.phone!) : '';
+    const isKalyana = data.isKalyanaVirundhu && data.kalyanaSlot && data.bookingDate;
+    const cleanedPhone = data.phone ? cleanPhoneNumber(data.phone) : '';
+    const formattedPhone = cleanedPhone ? formatAusMobile(data.phone!) : '';
 
-      if (cleanedPhone) {
-        let customer = cachedCustomers[cleanedPhone];
-        if (!customer) {
-          customer = {
+    if (isKalyana) {
+      const slotOccupancyRef = doc(db, 'slot_occupancy', `${data.bookingDate}_${data.kalyanaSlot}`);
+      const bookingId = `bk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      let newBooking: Booking;
+
+      try {
+        await runTransaction(db, async (transaction) => {
+          const occupancySnap = await transaction.get(slotOccupancyRef);
+          let currentCount = 0;
+          if (occupancySnap.exists()) {
+            currentCount = occupancySnap.data().guestsCount || 0;
+          } else {
+            const activeBookings = cachedBookings.filter(b => 
+              b.bookingDate === data.bookingDate && 
+              b.isKalyanaVirundhu && 
+              b.kalyanaSlot === data.kalyanaSlot && 
+              ['pending', 'confirmed', 'booked'].includes(b.status)
+            );
+            currentCount = activeBookings.reduce((sum, b) => sum + (b.partySize || 0), 0);
+          }
+
+          const slotConfig = this.getKalyanaSlots().find(s => s.range === data.kalyanaSlot);
+          const capacity = slotConfig ? slotConfig.capacity : this.getKalyanaCapacity();
+
+          if (currentCount + data.partySize > capacity) {
+            throw new Error('SLOT_FULL');
+          }
+
+          if (cleanedPhone) {
+            const customerRef = doc(db, 'customers', cleanedPhone);
+            const customerSnap = await transaction.get(customerRef);
+            let customer: any;
+            if (!customerSnap.exists()) {
+              customer = {
+                phone: formattedPhone,
+                firstName: data.firstName,
+                lastName: data.lastName || '',
+                totalVisits: 0,
+                lastVisitDate: new Date().toISOString(),
+                noShowCount: 0,
+                cancellationCount: 0,
+                whatsappOptIn: data.whatsappOptIn,
+                branchId: 'millpark',
+                notes: data.notes || '',
+                allergies: data.allergies || '',
+              };
+            } else {
+              customer = customerSnap.data();
+              if (data.firstName) customer.firstName = data.firstName;
+              if (data.lastName) customer.lastName = data.lastName;
+              customer.whatsappOptIn = data.whatsappOptIn;
+              if (data.notes) customer.notes = data.notes;
+              if (data.allergies) customer.allergies = data.allergies;
+            }
+            transaction.set(customerRef, customer);
+          }
+
+          newBooking = {
+            id: bookingId,
             phone: formattedPhone,
             firstName: data.firstName,
             lastName: data.lastName || '',
-            totalVisits: 0,
-            lastVisitDate: new Date().toISOString(),
-            noShowCount: 0,
-            cancellationCount: 0,
+            partySize: data.partySize,
+            childSeats: data.childSeats,
+            adultsCount: data.adultsCount,
+            childrenCount: data.childrenCount,
+            childrenHighChairs: data.childrenHighChairs,
             whatsappOptIn: data.whatsappOptIn,
+            type: data.type,
+            status: data.status,
+            createdAt: new Date().toISOString(),
+            bookingDate: data.bookingDate || null,
+            bookingTime: data.bookingTime || null,
+            isNewAlert: false,
             branchId: 'millpark',
+            isKalyanaVirundhu: true,
+            kalyanaSlot: data.kalyanaSlot,
+            source: 'phone/staff',
+            notes: data.notes || '',
+            allergies: data.allergies || '',
           };
-        } else {
-          if (data.firstName) customer.firstName = data.firstName;
-          if (data.lastName) customer.lastName = data.lastName;
-          customer.whatsappOptIn = data.whatsappOptIn;
-          if (!customer.branchId) customer.branchId = 'millpark';
+
+          const bookingRef = doc(db, 'bookings', bookingId);
+          transaction.set(bookingRef, newBooking);
+
+          transaction.set(slotOccupancyRef, {
+            guestsCount: currentCount + data.partySize,
+            lastUpdated: new Date().toISOString()
+          });
+        });
+
+        return newBooking!;
+      } catch (error: any) {
+        if (error.message === 'SLOT_FULL') {
+          throw new Error('This slot just filled up — please pick another');
         }
-        await safeSetDoc(doc(db, 'customers', cleanedPhone), customer);
+        throw error;
       }
+    } else {
+      try {
+        if (cleanedPhone) {
+          let customer = cachedCustomers[cleanedPhone];
+          if (!customer) {
+            customer = {
+              phone: formattedPhone,
+              firstName: data.firstName,
+              lastName: data.lastName || '',
+              totalVisits: 0,
+              lastVisitDate: new Date().toISOString(),
+              noShowCount: 0,
+              cancellationCount: 0,
+              whatsappOptIn: data.whatsappOptIn,
+              branchId: 'millpark',
+              notes: data.notes || '',
+              allergies: data.allergies || '',
+            };
+          } else {
+            if (data.firstName) customer.firstName = data.firstName;
+            if (data.lastName) customer.lastName = data.lastName;
+            customer.whatsappOptIn = data.whatsappOptIn;
+            if (data.notes) customer.notes = data.notes;
+            if (data.allergies) customer.allergies = data.allergies;
+            if (!customer.branchId) customer.branchId = 'millpark';
+          }
+          await safeSetDoc(doc(db, 'customers', cleanedPhone), customer);
+        }
 
-      const bookingId = `bk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-      const newBooking: Booking = {
-        id: bookingId,
-        phone: formattedPhone,
-        firstName: data.firstName,
-        lastName: data.lastName || '',
-        partySize: data.partySize,
-        childSeats: data.childSeats,
-        adultsCount: data.adultsCount,
-        childrenCount: data.childrenCount,
-        childrenHighChairs: data.childrenHighChairs,
-        whatsappOptIn: data.whatsappOptIn,
-        type: data.type,
-        status: data.status,
-        createdAt: new Date().toISOString(),
-        bookingDate: data.type === 'walk-in' ? null : (data.bookingDate || null),
-        bookingTime: data.type === 'walk-in' ? null : (data.bookingTime || null),
-        isNewAlert: false,
-        branchId: 'millpark',
-        isKalyanaVirundhu: data.isKalyanaVirundhu || null,
-        kalyanaSlot: data.kalyanaSlot || null,
-        source: 'phone/staff',
-      };
+        const bookingId = `bk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+        const newBooking: Booking = {
+          id: bookingId,
+          phone: formattedPhone,
+          firstName: data.firstName,
+          lastName: data.lastName || '',
+          partySize: data.partySize,
+          childSeats: data.childSeats,
+          adultsCount: data.adultsCount,
+          childrenCount: data.childrenCount,
+          childrenHighChairs: data.childrenHighChairs,
+          whatsappOptIn: data.whatsappOptIn,
+          type: data.type,
+          status: data.status,
+          createdAt: new Date().toISOString(),
+          bookingDate: data.type === 'walk-in' ? null : (data.bookingDate || null),
+          bookingTime: data.type === 'walk-in' ? null : (data.bookingTime || null),
+          isNewAlert: false,
+          branchId: 'millpark',
+          isKalyanaVirundhu: null,
+          kalyanaSlot: null,
+          source: 'phone/staff',
+          notes: data.notes || '',
+          allergies: data.allergies || '',
+        };
 
-      if (newBooking.type === 'walk-in') {
-        newBooking.estimatedWaitMinutes = this.calculateEstimatedWait(getRequiredTableSeats(newBooking));
+        if (newBooking.type === 'walk-in') {
+          newBooking.estimatedWaitMinutes = this.calculateEstimatedWait(getRequiredTableSeats(newBooking));
+        }
+
+        await safeSetDoc(doc(db, 'bookings', bookingId), newBooking);
+
+        if (newBooking.status === 'waiting') {
+          await this.updateAllWaitingEstimates();
+        }
+
+        return newBooking;
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, 'bookings');
+        throw error;
       }
-
-      await safeSetDoc(doc(db, 'bookings', bookingId), newBooking);
-
-      if (newBooking.status === 'waiting') {
-        await this.updateAllWaitingEstimates();
-      }
-
-      return newBooking;
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'bookings');
-      throw error;
     }
   },
 
@@ -976,6 +1257,7 @@ export const dataService = {
 
       if (result.success) {
         await this.updateAllWaitingEstimates();
+        await this.syncSlotOccupancyForBookingId(bookingId);
       }
 
       return result;
@@ -996,9 +1278,10 @@ export const dataService = {
       const tableSnap = await getDoc(tableDocRef);
       if (!tableSnap.exists()) return;
       const table = tableSnap.data() as Table;
-      if (!table.currentBookingId) return;
+      const bookingId = table.currentBookingId;
+      if (!bookingId) return;
 
-      const bookingDocRef = doc(db, 'bookings', table.currentBookingId);
+      const bookingDocRef = doc(db, 'bookings', bookingId);
       const bookingSnap = await getDoc(bookingDocRef);
 
       if (bookingSnap.exists()) {
@@ -1042,8 +1325,81 @@ export const dataService = {
       }, { merge: true });
 
       await this.updateAllWaitingEstimates();
+      await this.syncSlotOccupancyForBookingId(bookingId);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `tables/${tableId}`);
+    }
+  },
+
+  async autoFinishPreviousDaySeatedParties(): Promise<number> {
+    try {
+      const todayStr = new Date().toLocaleDateString('en-CA');
+      const seatedParties = cachedBookings.filter((b) => {
+        if (b.status !== 'seated') return false;
+        const refDate = b.bookingDate || (b.seatedAt ? b.seatedAt.split('T')[0] : b.createdAt.split('T')[0]);
+        return refDate < todayStr;
+      });
+
+      if (seatedParties.length === 0) return 0;
+
+      let count = 0;
+      for (const booking of seatedParties) {
+        const finishedAt = new Date().toISOString();
+        const bookingDocRef = doc(db, 'bookings', booking.id);
+
+        await safeSetDoc(bookingDocRef, {
+          status: 'finished',
+          finishedAt
+        }, { merge: true });
+
+        // Update customer profile
+        const cleaned = cleanPhoneNumber(booking.phone);
+        const customerDocRef = doc(db, 'customers', cleaned);
+        const customerSnap = await getDoc(customerDocRef);
+        if (customerSnap.exists()) {
+          const customer = customerSnap.data() as Customer;
+          await safeSetDoc(customerDocRef, {
+            totalVisits: (customer.totalVisits || 0) + 1,
+            lastVisitDate: finishedAt,
+            firstName: booking.firstName || customer.firstName,
+            lastName: booking.lastName || customer.lastName
+          }, { merge: true });
+        } else {
+          await safeSetDoc(customerDocRef, {
+            phone: booking.phone,
+            firstName: booking.firstName,
+            lastName: booking.lastName,
+            totalVisits: 1,
+            lastVisitDate: finishedAt,
+            noShowCount: 0,
+            cancellationCount: 0,
+            whatsappOptIn: booking.whatsappOptIn,
+            branchId: 'millpark',
+          });
+        }
+
+        // Find table and clear it
+        const table = cachedTables.find((t) => t.currentBookingId === booking.id);
+        if (table) {
+          const tableDocRef = doc(db, 'tables', table.id.toString());
+          await safeSetDoc(tableDocRef, {
+            isOccupied: false,
+            currentBookingId: null
+          }, { merge: true });
+        }
+
+        await this.syncSlotOccupancyForBookingId(booking.id);
+        count++;
+      }
+
+      if (count > 0) {
+        await this.updateAllWaitingEstimates();
+      }
+
+      return count;
+    } catch (err) {
+      console.error("Error auto-finishing previous day seated parties:", err);
+      return 0;
     }
   },
 
@@ -1054,6 +1410,7 @@ export const dataService = {
         createdAt: new Date().toISOString()
       }, { merge: true });
       await this.updateAllWaitingEstimates();
+      await this.syncSlotOccupancyForBookingId(bookingId);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
     }
@@ -1065,6 +1422,7 @@ export const dataService = {
         status: 'confirmed',
         isNewAlert: false
       }, { merge: true });
+      await this.syncSlotOccupancyForBookingId(bookingId);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
     }
@@ -1076,6 +1434,7 @@ export const dataService = {
         status: 'declined',
         isNewAlert: false
       }, { merge: true });
+      await this.syncSlotOccupancyForBookingId(bookingId);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
     }
@@ -1103,6 +1462,7 @@ export const dataService = {
           isNewAlert: true
         }, { merge: true });
       }
+      await this.syncSlotOccupancyForBookingId(bookingId);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
     }
@@ -1172,6 +1532,7 @@ export const dataService = {
           }, { merge: true });
         }
         await this.updateAllWaitingEstimates();
+        await this.syncSlotOccupancyForBookingId(bookingId);
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
@@ -1198,9 +1559,42 @@ export const dataService = {
           }, { merge: true });
         }
         await this.updateAllWaitingEstimates();
+        await this.syncSlotOccupancyForBookingId(bookingId);
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
+    }
+  },
+
+  async syncSlotOccupancyDoc(date: string, slot: string) {
+    try {
+      const activeBookings = cachedBookings.filter(b => 
+        b.bookingDate === date && 
+        b.isKalyanaVirundhu && 
+        b.kalyanaSlot === slot && 
+        ['pending', 'confirmed', 'booked'].includes(b.status)
+      );
+      const count = activeBookings.reduce((sum, b) => sum + (b.partySize || 0), 0);
+      await safeSetDoc(doc(db, 'slot_occupancy', `${date}_${slot}`), {
+        guestsCount: count,
+        lastUpdated: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error("Error syncing slot occupancy: ", err);
+    }
+  },
+
+  async syncSlotOccupancyForBookingId(bookingId: string) {
+    try {
+      const bDoc = await getDoc(doc(db, 'bookings', bookingId));
+      if (bDoc.exists()) {
+        const b = bDoc.data() as Booking;
+        if (b.isKalyanaVirundhu && b.bookingDate && b.kalyanaSlot) {
+          await this.syncSlotOccupancyDoc(b.bookingDate, b.kalyanaSlot);
+        }
+      }
+    } catch (err) {
+      console.error("Error in syncSlotOccupancyForBookingId: ", err);
     }
   },
 

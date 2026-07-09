@@ -1,5 +1,5 @@
 import React from 'react';
-import { Users, Baby, Phone, Clock, MessageSquare, Check, Utensils, ExternalLink } from 'lucide-react';
+import { Users, Baby, Phone, Clock, MessageSquare, Check, Utensils, ExternalLink, Sparkles } from 'lucide-react';
 import { Booking, Table } from '../../types';
 import { dataService } from '../../services/dataService';
 import { getWhatsAppUrl } from '../../utils/phone';
@@ -12,6 +12,7 @@ interface SeatedTabProps {
 }
 
 export const SeatedTab: React.FC<SeatedTabProps> = ({ bookings, tables, onRefresh }) => {
+  const isOnline = dataService.isOnline();
   const seatedList = bookings
     .filter((b) => b.status === 'seated')
     .sort((a, b) => {
@@ -79,9 +80,23 @@ export const SeatedTab: React.FC<SeatedTabProps> = ({ bookings, tables, onRefres
                         {booking.tableId ? `T${booking.tableId}` : 'T?'}
                       </div>
                       <div>
-                        <span className="font-serif font-bold text-base text-[#2D2926] dark:text-white block leading-tight">
-                          {booking.firstName} {booking.lastName}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-serif font-bold text-base text-[#2D2926] dark:text-white block leading-tight">
+                            {booking.firstName} {booking.lastName}
+                          </span>
+                          {(() => {
+                            const customerProfile = dataService.getCustomerByPhone(booking.phone);
+                            if (customerProfile?.isVip) {
+                              return (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-black bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-600 text-white shadow-sm animate-pulse">
+                                  <Sparkles className="w-2.5 h-2.5" />
+                                  <span>★ VIP</span>
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
+                        </div>
                         <span className="text-[11px] text-[#6B5E4C] dark:text-[#B8ACA0] font-medium">
                           {table ? table.name : `Table ${booking.tableId}`} ({table?.capacity || 6} seats)
                         </span>
@@ -114,6 +129,50 @@ export const SeatedTab: React.FC<SeatedTabProps> = ({ bookings, tables, onRefres
                       <span>{booking.phone}</span>
                     </div>
                   </div>
+
+                  {(booking.allergies || booking.notes) && (
+                    <div className="mt-2.5 space-y-1 bg-amber-500/5 dark:bg-amber-500/0 p-2.5 rounded-xl border border-dashed border-amber-500/20">
+                      {booking.allergies && (
+                        <div className="text-[11px] font-semibold text-rose-700 dark:text-rose-400">
+                          ⚠️ <strong className="font-bold">Allergies/Pref:</strong> {booking.allergies}
+                        </div>
+                      )}
+                      {booking.notes && (
+                        <div className="text-[11px] font-semibold text-[#6B5E4C] dark:text-[#B8ACA0]">
+                          📝 <strong className="font-bold">Notes:</strong> {booking.notes}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {(() => {
+                    const customerProfile = dataService.getCustomerByPhone(booking.phone);
+                    if (customerProfile && (customerProfile.isVip || customerProfile.allergies || customerProfile.notes)) {
+                      return (
+                        <div className="mt-2 space-y-1 bg-amber-500/5 dark:bg-[#26221E]/60 p-2.5 rounded-xl border border-[#D2B48C]/30 text-[11px]">
+                          <div className="font-bold text-[#E37A08] flex items-center gap-1 mb-1">
+                            <span>★</span> CRM Guest Profile:
+                          </div>
+                          {customerProfile.isVip && (
+                            <div className="text-amber-600 dark:text-amber-400 font-bold">
+                              • Designated VIP Guest
+                            </div>
+                          )}
+                          {customerProfile.allergies && (
+                            <div className="text-rose-700 dark:text-rose-400 font-semibold">
+                              • Profile Allergy Tag: {customerProfile.allergies}
+                            </div>
+                          )}
+                          {customerProfile.notes && (
+                            <div className="text-[#6B5E4C] dark:text-[#B8ACA0] font-medium italic">
+                              • Profile Staff Note: "{customerProfile.notes}"
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
 
                 {/* Actions */}
@@ -130,11 +189,16 @@ export const SeatedTab: React.FC<SeatedTabProps> = ({ bookings, tables, onRefres
                   </a>
 
                   <button
+                    disabled={!isOnline}
                     onClick={() => handleFinish(booking.tableId, `${booking.firstName} ${booking.lastName}`)}
-                    className="py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition-all flex items-center justify-center gap-1.5 active:scale-95"
+                    className={`py-2.5 px-4 rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 active:scale-95 ${
+                      !isOnline
+                        ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 border border-zinc-200 dark:border-zinc-750 cursor-not-allowed shadow-none'
+                        : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-emerald-600/20'
+                    }`}
                   >
                     <Check className="w-4 h-4" />
-                    <span>Finished</span>
+                    <span>{isOnline ? 'Finished' : 'No connection'}</span>
                   </button>
                 </div>
               </div>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, ArrowUpDown, MessageSquare, ExternalLink, Sparkles, AlertTriangle, CheckCircle2, XCircle, Trash2, GitMerge } from 'lucide-react';
+import { Search, ArrowUpDown, MessageSquare, ExternalLink, Sparkles, AlertTriangle, CheckCircle2, XCircle, Trash2, GitMerge, Edit3, ShieldAlert } from 'lucide-react';
 import { Customer } from '../../types';
 import { getWhatsAppUrl } from '../../utils/phone';
 import { dataService } from '../../services/dataService';
@@ -20,6 +20,12 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, adminRole
   const [mergePrimary, setMergePrimary] = useState<Customer | null>(null);
   const [mergeSecondary, setMergeSecondary] = useState<Customer | null>(null);
   const [keepPrimaryName, setKeepPrimaryName] = useState(true);
+
+  // Profile Edit states
+  const [customerToEdit, setCustomerToEdit] = useState<Customer | null>(null);
+  const [isVip, setIsVip] = useState(false);
+  const [allergies, setAllergies] = useState('');
+  const [notes, setNotes] = useState('');
 
   const customerList: Customer[] = Object.values(customers);
 
@@ -81,6 +87,17 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, adminRole
     dataService.mergeCustomers(mergePrimary.phone, mergeSecondary.phone, keepPrimaryName);
     setMergePrimary(null);
     setMergeSecondary(null);
+    if (onRefresh) onRefresh();
+  };
+
+  const handleSaveProfile = async () => {
+    if (!customerToEdit) return;
+    await dataService.updateCustomer(customerToEdit.phone, {
+      isVip,
+      allergies: allergies.trim() || undefined,
+      notes: notes.trim() || undefined
+    });
+    setCustomerToEdit(null);
     if (onRefresh) onRefresh();
   };
 
@@ -187,7 +204,13 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, adminRole
                         <span className="font-serif font-bold text-base text-[#2D2926] dark:text-white">
                           {cust.firstName} {cust.lastName}
                         </span>
-                        {isRegular && (
+                        {cust.isVip && (
+                          <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] font-black bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-600 text-white shadow-md shadow-amber-500/20 animate-pulse">
+                            <Sparkles className="w-2.5 h-2.5" />
+                            <span>★ VIP</span>
+                          </span>
+                        )}
+                        {isRegular && !cust.isVip && (
                           <span className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] font-black bg-[#E37A08] text-white shadow-sm">
                             <Sparkles className="w-2.5 h-2.5" />
                             <span>REGULAR</span>
@@ -212,6 +235,23 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, adminRole
                         <span>Total Visits: <strong className="text-[#8B4513] dark:text-[#D2B48C] font-bold">{cust.totalVisits}</strong></span>
                         <span>Last Visit: <strong className="text-[#2D2926] dark:text-zinc-300">{formatDate(cust.lastVisitDate)}</strong></span>
                       </div>
+
+                      {(cust.allergies || cust.notes) && (
+                        <div className="mt-1.5 flex flex-wrap gap-2 text-[11px]">
+                          {cust.allergies && (
+                            <span className="bg-rose-500/10 text-rose-700 dark:text-rose-400 px-2 py-0.5 rounded border border-rose-200 dark:border-rose-900/40 font-semibold flex items-center gap-1">
+                              <span>⚠️ Pref:</span>
+                              <span>{cust.allergies}</span>
+                            </span>
+                          )}
+                          {cust.notes && (
+                            <span className="bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-2 py-0.5 rounded border border-zinc-200 dark:border-zinc-700 font-medium flex items-center gap-1">
+                              <span>📝 Notes:</span>
+                              <span>{cust.notes}</span>
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -232,6 +272,20 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, adminRole
                     </div>
 
                     <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => {
+                          setCustomerToEdit(cust);
+                          setIsVip(!!cust.isVip);
+                          setAllergies(cust.allergies || '');
+                          setNotes(cust.notes || '');
+                        }}
+                        className="py-2 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-800 dark:text-amber-400 font-semibold text-xs transition-all flex items-center gap-1 shrink-0 border border-amber-500/30"
+                        title="Edit CRM Profile & VIP details"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>Profile</span>
+                      </button>
+
                       <a
                         href={waUrl}
                         target="_blank"
@@ -386,6 +440,86 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, adminRole
                 className="flex-1 py-2.5 px-4 rounded-xl bg-[#E37A08] hover:bg-[#c96906] text-white font-semibold text-sm shadow-md transition-colors text-center"
               >
                 Confirm Merge
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CUSTOMER PROFILE EDITOR MODAL */}
+      {customerToEdit && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] rounded-3xl p-6 max-w-md w-full shadow-2xl relative">
+            <h3 className="text-xl font-serif font-bold text-zinc-900 dark:text-white mb-2 flex items-center gap-2">
+              <span className="text-amber-500">★</span> Customer Profile Editor
+            </h3>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-6">
+              Configure loyalty CRM tags, allergies, and staff notes for <strong>{customerToEdit.firstName} {customerToEdit.lastName}</strong> ({customerToEdit.phone}).
+            </p>
+
+            <div className="space-y-4 mb-6 text-left">
+              {/* VIP Toggle */}
+              <label className="flex items-center justify-between p-3.5 rounded-2xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] cursor-pointer">
+                <div className="flex flex-col text-left">
+                  <span className="text-sm font-bold text-zinc-900 dark:text-white flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-amber-500 fill-amber-400 animate-pulse" />
+                    <span>VIP Customer Badge</span>
+                  </span>
+                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+                    Highlights guest as VIP across booking lists
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={isVip}
+                  onChange={(e) => setIsVip(e.target.checked)}
+                  className="w-5 h-5 accent-amber-500 cursor-pointer rounded border-[#E8E2D2]"
+                />
+              </label>
+
+              {/* Allergies & Preferences */}
+              <div className="text-left">
+                <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
+                  Allergies & CRM Preferences
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Gluten-free, prefers window table, peanut allergy"
+                  value={allergies}
+                  onChange={(e) => setAllergies(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-zinc-950 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
+                />
+              </div>
+
+              {/* General Staff Notes */}
+              <div className="text-left">
+                <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
+                  Staff Notes (Internal CRM Notes)
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="e.g. Highly valued customer, CEO friend, prefers mild spice level"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-zinc-950 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setCustomerToEdit(null)}
+                className="flex-1 py-2.5 px-4 rounded-xl border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 font-semibold text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveProfile}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-[#E37A08] hover:bg-[#c96906] text-white font-semibold text-sm shadow-md transition-colors"
+              >
+                Save Profile
               </button>
             </div>
           </div>

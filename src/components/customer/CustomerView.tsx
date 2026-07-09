@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Utensils, Clock, Calendar, Users, Baby, Phone, MessageSquare, CheckCircle2, Sparkles, ArrowLeft, AlertCircle, XCircle, QrCode } from 'lucide-react';
+import { Utensils, Clock, Calendar, Users, Baby, Phone, MessageSquare, CheckCircle2, Sparkles, ArrowLeft, AlertCircle, XCircle, QrCode, ExternalLink } from 'lucide-react';
 import { Booking } from '../../types';
 import { dataService, db } from '../../services/dataService';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -84,6 +84,8 @@ export const CustomerView: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState('');
   const [showChangeForm, setShowChangeForm] = useState(false);
   const [changeNote, setChangeNote] = useState('');
+  const [allergies, setAllergies] = useState('');
+  const [notes, setNotes] = useState('');
 
   const getDayOfWeek = (dateStr: string) => {
     if (!dateStr) return -1;
@@ -272,34 +274,44 @@ export const CustomerView: React.FC = () => {
       }
     }
 
-    const newBk = await dataService.createBooking({
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      phone,
-      partySize: totalGuests,
-      childSeats: highChairsNeeded,
-      adultsCount,
-      childrenCount,
-      childrenHighChairs,
-      whatsappOptIn,
-      type: activeTab === 'walk-in' ? 'walk-in' : 'remote',
-      bookingDate: activeTab === 'remote' ? bookingDate : undefined,
-      bookingTime: activeTab === 'remote' ? (isKalyana ? kalyanaSlot : bookingTime) : undefined,
-      isKalyanaVirundhu: isKalyana,
-      kalyanaSlot: isKalyana ? kalyanaSlot : undefined,
-    });
+    try {
+      const newBk = await dataService.createBooking({
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        phone,
+        partySize: totalGuests,
+        childSeats: highChairsNeeded,
+        adultsCount,
+        childrenCount,
+        childrenHighChairs,
+        whatsappOptIn,
+        type: activeTab === 'walk-in' ? 'walk-in' : 'remote',
+        bookingDate: activeTab === 'remote' ? bookingDate : undefined,
+        bookingTime: activeTab === 'remote' ? (isKalyana ? kalyanaSlot : bookingTime) : undefined,
+        isKalyanaVirundhu: isKalyana,
+        kalyanaSlot: isKalyana ? kalyanaSlot : undefined,
+        allergies: allergies.trim() || undefined,
+        notes: notes.trim() || undefined,
+      });
 
-    localStorage.setItem('just_dosa_active_customer_booking_id', newBk.id);
-    setActiveBookingId(newBk.id);
-    setActiveBooking(newBk);
-    setHasRoutedOnLoad(true);
+      localStorage.setItem('just_dosa_active_customer_booking_id', newBk.id);
+      setActiveBookingId(newBk.id);
+      setActiveBooking(newBk);
+      setHasRoutedOnLoad(true);
 
-    if (newBk.type === 'walk-in') {
-      const qInfo = dataService.getWaitingQueuePosition(newBk.id);
-      setQueueInfo(qInfo);
-      setActiveTab('status');
-    } else {
-      setActiveTab('confirmation');
+      if (newBk.type === 'walk-in') {
+        const qInfo = dataService.getWaitingQueuePosition(newBk.id);
+        setQueueInfo(qInfo);
+        setActiveTab('status');
+      } else {
+        setActiveTab('confirmation');
+      }
+    } catch (err: any) {
+      if (err.message && err.message.includes('This slot just filled up')) {
+        setErrorMsg(err.message);
+      } else {
+        setErrorMsg('Something went wrong while securing your booking. Please try again.');
+      }
     }
   };
 
@@ -331,6 +343,8 @@ export const CustomerView: React.FC = () => {
     setWhatsappOptIn(false);
     setSaturdayMenuType(null);
     setHasRoutedOnLoad(false);
+    setAllergies('');
+    setNotes('');
   };
 
   const handleBackToHome = () => {
@@ -498,6 +512,28 @@ export const CustomerView: React.FC = () => {
                   Live Auto-Updating Screen
                 </div>
                 When our staff allocates your table, this screen will instantly change to show your table number!
+              </div>
+
+              {/* WhatsApp Self-Link Saver card */}
+              <div className="bg-emerald-600/10 border border-emerald-500/30 rounded-2xl p-4 text-left mb-6 space-y-2">
+                <span className="text-xs font-bold text-emerald-400 block uppercase tracking-wider flex items-center gap-1">
+                  <span>💾</span> Save My Live Position Link
+                </span>
+                <p className="text-[11px] text-[#B8ACA0] leading-relaxed">
+                  Send this link to yourself on WhatsApp so you can easily check your live queue position if you close this tab!
+                </p>
+                <button
+                  onClick={() => {
+                    const uniqueLink = `${window.location.origin}?bookingId=${activeBooking.id}`;
+                    const text = `Here is my Just Dosa live waitlist tracking link:\n${uniqueLink}`;
+                    const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+                    window.open(waUrl, '_blank');
+                  }}
+                  className="w-full py-2.5 px-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  <span>Send Link to My WhatsApp</span>
+                </button>
               </div>
             </div>
           )}
@@ -711,6 +747,28 @@ export const CustomerView: React.FC = () => {
                   <span>You're subscribed for updates on WhatsApp!</span>
                 </div>
               )}
+
+              {/* WhatsApp Self-Link Saver card */}
+              <div className="bg-emerald-600/10 border border-emerald-500/30 rounded-2xl p-4 text-left mb-6 space-y-2">
+                <span className="text-xs font-bold text-emerald-400 block uppercase tracking-wider flex items-center gap-1">
+                  <span>💾</span> Keep Your Booking Link Safe
+                </span>
+                <p className="text-[11px] text-[#B8ACA0] leading-relaxed">
+                  Send this link to yourself on WhatsApp so you can easily view, change, or track your booking status anytime!
+                </p>
+                <button
+                  onClick={() => {
+                    const uniqueLink = `${window.location.origin}?bookingId=${activeBooking.id}`;
+                    const text = `Here is my Just Dosa booking link to view or manage my reservation:\n${uniqueLink}`;
+                    const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+                    window.open(waUrl, '_blank');
+                  }}
+                  className="w-full py-2.5 px-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  <span>Send Link to My WhatsApp</span>
+                </button>
+              </div>
 
               {/* Action Buttons */}
               <div className="space-y-3 mb-6">
@@ -1336,6 +1394,35 @@ export const CustomerView: React.FC = () => {
                 </div>
               </motion.div>
             )}
+
+            {/* Allergies & Notes */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
+                  Allergies & Preferences
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. No gluten, window table"
+                  value={allergies}
+                  onChange={(e) => setAllergies(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
+                  General Notes
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Celebrating Anniversary"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
+                />
+              </div>
+            </div>
 
             {/* Optional WhatsApp Checkbox */}
             <div className="pt-2">

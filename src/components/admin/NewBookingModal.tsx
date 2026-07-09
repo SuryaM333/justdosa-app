@@ -44,6 +44,8 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
   const [whatsappOptIn, setWhatsappOptIn] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [allergies, setAllergies] = useState('');
+  const [notes, setNotes] = useState('');
 
   // Search existing customer based on entered phone
   const cleanedPhone = cleanPhoneNumber(phone);
@@ -66,6 +68,8 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
       setWhatsappOptIn(true);
       setErrorMsg('');
       setIsSubmitting(false);
+      setAllergies('');
+      setNotes('');
     }
   }, [isOpen]);
 
@@ -165,12 +169,18 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
         kalyanaSlot: isKalyana ? kalyanaSlot : undefined,
         status: isWaitlist ? 'waiting' : 'confirmed',
         source: 'phone/staff',
+        allergies: allergies.trim() || undefined,
+        notes: notes.trim() || undefined,
       });
 
       onRefresh();
       onClose();
-    } catch (err) {
-      setErrorMsg('Failed to save manual booking. Please try again.');
+    } catch (err: any) {
+      if (err.message && err.message.includes('This slot just filled up')) {
+        setErrorMsg(err.message);
+      } else {
+        setErrorMsg('Failed to save manual booking. Please try again.');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -565,6 +575,35 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
                 )}
               </motion.div>
             )}
+
+            {/* Allergies & Notes */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
+                  Allergies & Preferences
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. No nuts, prefers window"
+                  value={allergies}
+                  onChange={(e) => setAllergies(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-sm text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
+                  General Notes
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Birthday celebration"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-sm text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
+                />
+              </div>
+            </div>
 
             {/* Whatsapp Opt-in */}
             <div className="flex items-center gap-2.5 pt-1">
