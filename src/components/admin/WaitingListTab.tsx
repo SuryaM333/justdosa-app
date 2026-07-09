@@ -25,6 +25,7 @@ export const WaitingListTab: React.FC<WaitingListTabProps> = ({
   onRefresh,
   onOpenNewBooking,
 }) => {
+  const isOnline = dataService.isOnline();
   const [quickSeatBooking, setQuickSeatBooking] = useState<Booking | null>(null);
 
   // Live timer tick every second

@@ -27,6 +27,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [quickSeatPartySize, setQuickSeatPartySize] = useState(2);
   const [quickSeatName, setQuickSeatName] = useState('');
   const [quickSeatPhone, setQuickSeatPhone] = useState('');
+  const [quickSeatServer, setQuickSeatServer] = useState('');
 
   const getTableBooking = (table: Table): Booking | undefined => {
     if (!table.currentBookingId) return undefined;
@@ -118,6 +119,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       setQuickSeatPartySize(Math.min(2, table.capacity));
       setQuickSeatName('');
       setQuickSeatPhone('');
+      setQuickSeatServer(table.assignedServer || '');
     }
   };
 
@@ -131,6 +133,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       quickSeatPhone.trim() || '0400 000 000'
     );
     if (res.success) {
+      await dataService.assignServerToTable(quickSeatModal.id, quickSeatServer || null);
       setQuickSeatModal(null);
       onTableUpdated();
     } else {
@@ -211,8 +214,15 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         )}
         <div className={`flex flex-col items-center justify-center text-center p-2 ${isDiamond ? '-rotate-45' : ''}`}>
           {/* Table Number Badge */}
-          <div className={`text-xs font-bold px-2 py-0.5 rounded-full mb-1 shadow-sm ${badgeBg}`}>
-            {table.name}
+          <div className="flex flex-col items-center gap-0.5 mb-1.5">
+            <div className={`text-xs font-bold px-2 py-0.5 rounded-full shadow-sm ${badgeBg}`}>
+              {table.name}
+            </div>
+            {table.assignedServer && (
+              <span className="text-[9px] font-bold tracking-wider uppercase bg-white/70 dark:bg-[#1C1917]/70 text-amber-800 dark:text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/20 shadow-xs mt-0.5 whitespace-nowrap">
+                👤 {table.assignedServer}
+              </span>
+            )}
           </div>
 
           {/* Status / Content */}
@@ -507,6 +517,28 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                       <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Seated Duration</span>
                       <span className="font-bold text-rose-600 dark:text-rose-400">{getSeatedDuration(bk.seatedAt)}</span>
                     </div>
+                    <div className="mt-4 pt-3 border-t border-[#E8E2D2]/50 dark:border-[#3D352E]/50 text-left">
+                      <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase mb-1.5">
+                        Assigned Floor Server
+                      </label>
+                      <select
+                        value={selectedOccupiedTable.assignedServer || ''}
+                        onChange={async (e) => {
+                          const val = e.target.value || null;
+                          await dataService.assignServerToTable(selectedOccupiedTable.id, val);
+                          setSelectedOccupiedTable({ ...selectedOccupiedTable, assignedServer: val || undefined });
+                          onTableUpdated();
+                        }}
+                        className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-xs font-bold text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
+                      >
+                        <option value="">-- No Server Assigned --</option>
+                        {dataService.getStaffList().map((staffName) => (
+                          <option key={staffName} value={staffName}>
+                            👤 {staffName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 ) : (
                   <p className="text-xs text-[#6B5E4C] mb-6">Occupied table.</p>
@@ -612,21 +644,54 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                   />
                 </div>
 
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setQuickSeatModal(null)}
-                    className="flex-1 py-3 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] text-[#2D2926] dark:text-[#B8ACA0] font-semibold text-xs border border-[#E8E2D2] dark:border-[#3D352E]"
+                <div>
+                  <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] mb-1">
+                    Assign Floor Server
+                  </label>
+                  <select
+                    value={quickSeatServer}
+                    onChange={(e) => setQuickSeatServer(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-xs font-bold text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
                   >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 py-3 rounded-xl bg-[#E37A08] hover:bg-[#c96906] text-white font-bold text-xs shadow-md shadow-[#E37A08]/20 flex items-center justify-center gap-1.5"
-                  >
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>Seat Party Here</span>
-                  </button>
+                    <option value="">-- No Server Assigned --</option>
+                    {dataService.getStaffList().map((staffName) => (
+                      <option key={staffName} value={staffName}>
+                        👤 {staffName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-2 pt-2">
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setQuickSeatModal(null)}
+                      className="flex-1 py-3 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] text-[#2D2926] dark:text-[#B8ACA0] font-semibold text-xs border border-[#E8E2D2] dark:border-[#3D352E]"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="flex-1 py-3 rounded-xl bg-[#E37A08] hover:bg-[#c96906] text-white font-bold text-xs shadow-md shadow-[#E37A08]/20 flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Seat Party Here</span>
+                    </button>
+                  </div>
+                  {quickSeatServer !== (quickSeatModal.assignedServer || '') && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await dataService.assignServerToTable(quickSeatModal.id, quickSeatServer || null);
+                        setQuickSeatModal(null);
+                        onTableUpdated();
+                      }}
+                      className="w-full py-2.5 rounded-xl border border-dashed border-[#E37A08]/50 bg-[#E37A08]/5 hover:bg-[#E37A08]/10 text-[#E37A08] font-bold text-xs transition-all flex items-center justify-center gap-1 cursor-pointer"
+                    >
+                      <span>Assign 👤 {quickSeatServer || 'None'} (No Seating)</span>
+                    </button>
+                  )}
                 </div>
               </form>
             </motion.div>

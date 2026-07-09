@@ -38,6 +38,8 @@ export const SettingsTab: React.FC = () => {
   const [waitTimeAlertThresholds, setWaitTimeAlertThresholds] = useState(() => ({ ...dataService.getWaitTimeAlertThresholds() }));
   const [openingHours, setOpeningHours] = useState(() => JSON.parse(JSON.stringify(dataService.getOpeningHours())));
   const [tables, setTables] = useState<Table[]>([]);
+  const [staffList, setStaffList] = useState<string[]>(() => dataService.getStaffList());
+  const [newStaffName, setNewStaffName] = useState('');
 
   const [isInitialized, setIsInitialized] = useState(false);
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
@@ -70,6 +72,7 @@ export const SettingsTab: React.FC = () => {
       setWaitTimeAlertThresholds({ ...dataService.getWaitTimeAlertThresholds() });
       setOpeningHours(JSON.parse(JSON.stringify(dataService.getOpeningHours())));
       setTables(dataService.getTables().map(t => ({ ...t })));
+      setStaffList(dataService.getStaffList());
       setIsInitialized(true);
     };
 
@@ -238,6 +241,7 @@ export const SettingsTab: React.FC = () => {
       };
 
       await dataService.saveAllSettings(payload);
+      await dataService.setStaffList(staffList);
 
       // If a new Staff PIN was typed, save its hash and clear input
       if (staffPin) {
@@ -1182,6 +1186,79 @@ export const SettingsTab: React.FC = () => {
                       />
                       <span className="text-[9px] text-[#6B5E4C]/70 dark:text-[#B8ACA0]/70 block mt-1">Default: 20 mins</span>
                     </div>
+                  </div>
+                </div>
+
+                {/* 🧑‍🍳 Wait Staff Members (Floor Servers) */}
+                <div className="space-y-3 pt-2">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#6B5E4C] dark:text-[#B8ACA0]">
+                    Wait Staff / Servers List
+                  </h4>
+                  <p className="text-[11px] text-[#6B5E4C] dark:text-[#B8ACA0] leading-relaxed">
+                    Add or remove active wait staff members. These servers can be assigned to individual tables on the floor plan to coordinate dining service and track table assignments live!
+                  </p>
+                  
+                  <div className="p-4 rounded-2xl border border-[#E8E2D2]/60 dark:border-[#3D352E]/60 bg-[#FDFBF7] dark:bg-[#1C1917]/30 space-y-4">
+                    <div className="flex gap-2">
+                      <input 
+                        type="text"
+                        placeholder="e.g. Sanjay"
+                        value={newStaffName}
+                        onChange={(e) => setNewStaffName(e.target.value)}
+                        className="px-3.5 py-2 text-sm rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-[#2D2926] dark:text-white grow focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (newStaffName.trim()) {
+                              const name = newStaffName.trim();
+                              if (!staffList.includes(name)) {
+                                setStaffList([...staffList, name]);
+                              }
+                              setNewStaffName('');
+                            }
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (newStaffName.trim()) {
+                            const name = newStaffName.trim();
+                            if (!staffList.includes(name)) {
+                              setStaffList([...staffList, name]);
+                            }
+                            setNewStaffName('');
+                          }
+                        }}
+                        className="py-2.5 px-4 rounded-xl bg-[#E37A08] hover:bg-[#c96906] text-white text-xs font-bold transition-all shrink-0 cursor-pointer"
+                      >
+                        Add Server
+                      </button>
+                    </div>
+
+                    {staffList.length === 0 ? (
+                      <p className="text-xs text-zinc-400 italic">No wait staff members configured yet. Add some servers above!</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {staffList.map((staff) => (
+                          <div 
+                            key={staff} 
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs font-bold text-amber-800 dark:text-amber-400"
+                          >
+                            <span>{staff}</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStaffList(staffList.filter(s => s !== staff));
+                              }}
+                              className="text-amber-800 dark:text-amber-400 hover:text-rose-500 transition-colors cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
 

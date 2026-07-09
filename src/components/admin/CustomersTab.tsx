@@ -272,19 +272,21 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, adminRole
                     </div>
 
                     <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => {
-                          setCustomerToEdit(cust);
-                          setIsVip(!!cust.isVip);
-                          setAllergies(cust.allergies || '');
-                          setNotes(cust.notes || '');
-                        }}
-                        className="py-2 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-800 dark:text-amber-400 font-semibold text-xs transition-all flex items-center gap-1 shrink-0 border border-amber-500/30"
-                        title="Edit CRM Profile & VIP details"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        <span>Profile</span>
-                      </button>
+                      {isOwner && (
+                        <button
+                          onClick={() => {
+                            setCustomerToEdit(cust);
+                            setIsVip(!!cust.isVip);
+                            setAllergies(cust.allergies || '');
+                            setNotes(cust.notes || '');
+                          }}
+                          className="py-2 px-3 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-800 dark:text-amber-400 font-semibold text-xs transition-all flex items-center gap-1 shrink-0 border border-amber-500/30 cursor-pointer"
+                          title="Edit CRM Profile & VIP details"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                          <span>Profile</span>
+                        </button>
+                      )}
 
                       <a
                         href={waUrl}

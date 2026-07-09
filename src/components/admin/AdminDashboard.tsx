@@ -43,6 +43,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole, onRes
       document.title = 'Just Dosa';
     }
 
+    // PWA Badging API support for iPad and mobile
+    if (typeof navigator !== 'undefined' && 'setAppBadge' in navigator) {
+      if (currentPending.length > 0) {
+        (navigator as any).setAppBadge(currentPending.length).catch((e: any) => console.error(e));
+      } else {
+        (navigator as any).clearAppBadge().catch((e: any) => console.error(e));
+      }
+    }
+
     // New booking check
     const hasNewPending = currentPendingIds.some((id) => !prevPendingIds.includes(id));
     if (hasNewPending && prevPendingIds.length > 0) {

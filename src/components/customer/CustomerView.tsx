@@ -86,6 +86,7 @@ export const CustomerView: React.FC = () => {
   const [changeNote, setChangeNote] = useState('');
   const [allergies, setAllergies] = useState('');
   const [notes, setNotes] = useState('');
+  const [showNotesField, setShowNotesField] = useState(false);
 
   const getDayOfWeek = (dateStr: string) => {
     if (!dateStr) return -1;
@@ -345,6 +346,7 @@ export const CustomerView: React.FC = () => {
     setHasRoutedOnLoad(false);
     setAllergies('');
     setNotes('');
+    setShowNotesField(false);
   };
 
   const handleBackToHome = () => {
@@ -1396,33 +1398,45 @@ export const CustomerView: React.FC = () => {
             )}
 
             {/* Allergies & Notes */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
-                  Allergies & Preferences
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. No gluten, window table"
-                  value={allergies}
-                  onChange={(e) => setAllergies(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
-                />
+            {!showNotesField ? (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowNotesField(true)}
+                  className="text-xs font-bold text-[#E37A08] hover:text-[#c96906] transition-colors flex items-center gap-1 cursor-pointer"
+                >
+                  <span>+ Add allergies, dietary preferences or special notes</span>
+                </button>
               </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
+                    Allergies & Preferences
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. No gluten, window table"
+                    value={allergies}
+                    onChange={(e) => setAllergies(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
+                  />
+                </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
-                  General Notes
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Celebrating Anniversary"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
-                />
+                <div>
+                  <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
+                    General Notes
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Celebrating Anniversary"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Optional WhatsApp Checkbox */}
             <div className="pt-2">

@@ -4,6 +4,24 @@
 
 let audioCtx: AudioContext | null = null;
 
+if (typeof window !== 'undefined') {
+  const initAudioCtx = () => {
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioContextClass && !audioCtx) {
+        audioCtx = new AudioContextClass();
+      }
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    } catch (e) {
+      console.warn('Silent audio ctx init failed:', e);
+    }
+  };
+  window.addEventListener('click', initAudioCtx, { once: true });
+  window.addEventListener('touchstart', initAudioCtx, { once: true });
+}
+
 export function playNewBookingChime() {
   try {
     const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
