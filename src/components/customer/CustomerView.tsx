@@ -371,7 +371,8 @@ export const CustomerView: React.FC = () => {
     const allocatedTable = activeBooking.tableId
       ? dataService.getTables().find((t) => t.id.toString() === activeBooking.tableId?.toString() || t.name === activeBooking.tableId?.toString())
       : null;
-    const orderingUrl = allocatedTable?.orderingUrl || (activeBooking.tableId ? `https://justdosa.com.au/order/table-${activeBooking.tableId}` : null);
+    const isNoOrderingTable = activeBooking.tableId?.toString() === '6' || activeBooking.tableId?.toString() === '7' || activeBooking.tableId?.toString() === 'Table 6' || activeBooking.tableId?.toString() === 'Table 7';
+    const orderingUrl = isNoOrderingTable ? '' : (allocatedTable?.orderingUrl || (activeBooking.tableId ? `https://justdosa.com.au/order/table-${activeBooking.tableId}` : null));
 
     return (
       <div className="min-h-[calc(100vh-4rem)] bg-[#1C1917] py-8 px-4 flex flex-col items-center justify-center">
@@ -449,9 +450,9 @@ export const CustomerView: React.FC = () => {
                   Table {activeBooking.tableId}
                 </div>
 
-                {orderingUrl && (
+                {activeBooking.tableId && (
                   <div className="mt-4 pt-4 border-t border-[#3D352E] text-left">
-                    {(activeBooking.tableId?.toString() === '6' || activeBooking.tableId?.toString() === '7' || !orderingUrl || orderingUrl.includes('table-6') || orderingUrl.includes('table-7')) ? (
+                    {(isNoOrderingTable || !orderingUrl) ? (
                       <div className="text-xs font-semibold text-[#D2B48C] text-center bg-[#26221E] border border-[#3D352E] p-3.5 rounded-xl mb-3 leading-relaxed">
                         {dataService.getCustomerTexts().noOrderingUrlNote}
                       </div>

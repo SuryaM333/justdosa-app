@@ -4,6 +4,7 @@ import { playNewBookingChime } from '../utils/sound';
 import { getRequiredTableSeats } from '../utils/bookingUtils';
 import { initializeApp } from 'firebase/app';
 import { 
+  initializeFirestore,
   getFirestore, 
   collection, 
   doc, 
@@ -23,7 +24,9 @@ import { hashPin } from '../utils/crypto';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true
+}, firebaseConfig.firestoreDatabaseId);
 
 // ----------------------------------------------------
 // FIRESTORE ERROR HANDLING (Spec compliant)
@@ -209,16 +212,16 @@ const DEFAULT_SETTINGS = {
 };
 
 const INITIAL_TABLES: Table[] = [
-  { id: 1, name: 'Table 1', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=1', position: { column: 'right', order: 3 } },
-  { id: 2, name: 'Table 2', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=2', position: { column: 'right', order: 2 } },
-  { id: 3, name: 'Table 3', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=3', position: { column: 'right', order: 1 } },
-  { id: 4, name: 'Table 4', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=4', position: { column: 'top', order: 1 } },
-  { id: 5, name: 'Table 5', capacity: 2, maxOverrideCapacity: 3, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=5', position: { column: 'middle', order: 1, isDiamond: true } },
-  { id: 6, name: 'Table 6', capacity: 2, maxOverrideCapacity: 3, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=6', position: { column: 'middle', order: 2, isDiamond: true } },
-  { id: 7, name: 'Table 7', capacity: 2, maxOverrideCapacity: 3, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=7', position: { column: 'middle', order: 3, isDiamond: true } },
-  { id: 8, name: 'Table 8', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=8', position: { column: 'left', order: 3 } },
-  { id: 9, name: 'Table 9', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=9', position: { column: 'left', order: 2 } },
-  { id: 10, name: 'Table 10', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=10', position: { column: 'left', order: 1 } },
+  { id: 1, name: 'Table 1', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5c70b0ac601a7db5ad9236', position: { column: 'right', order: 3 } },
+  { id: 2, name: 'Table 2', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5c8e9ca5a01a7db5ad9236', position: { column: 'right', order: 2 } },
+  { id: 3, name: 'Table 3', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5c9f04baf31a7db5ad9236', position: { column: 'right', order: 1 } },
+  { id: 4, name: 'Table 4', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5cac42bcf61a7db5ad9236', position: { column: 'top', order: 1 } },
+  { id: 5, name: 'Table 5', capacity: 2, maxOverrideCapacity: 3, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5cb926a2491a7db5ad9236', position: { column: 'middle', order: 1, isDiamond: true } },
+  { id: 6, name: 'Table 6', capacity: 2, maxOverrideCapacity: 3, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: '', position: { column: 'middle', order: 2, isDiamond: true } },
+  { id: 7, name: 'Table 7', capacity: 2, maxOverrideCapacity: 3, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: '', position: { column: 'middle', order: 3, isDiamond: true } },
+  { id: 8, name: 'Table 8', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5cde429f761a7db5ad9236', position: { column: 'left', order: 3 } },
+  { id: 9, name: 'Table 9', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5ce8d8a1221a7db5ad9236', position: { column: 'left', order: 2 } },
+  { id: 10, name: 'Table 10', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5cf468b6671a7db5ad9236', position: { column: 'left', order: 1 } },
 ];
 
 async function migratePlaintextPins() {
@@ -327,6 +330,50 @@ function initFirestoreSync() {
         querySnap.forEach((doc) => {
           tables.push(doc.data() as Table);
         });
+
+        // Self-healing database check to ensure real Square URLs are used and Table 7 is active
+        let needsUpdate = false;
+        const updatedTables = tables.map((t) => {
+          let modified = false;
+          const initial = INITIAL_TABLES.find((it) => it.id === t.id);
+          if (initial) {
+            // Table 7 must be active
+            if (t.id === 7 && t.isInactive) {
+              t.isInactive = false;
+              modified = true;
+            }
+            // Table 7 capacity properties must match Table 5/6 (capacity 2, maxOverrideCapacity 3)
+            if (t.id === 7 && (t.capacity !== 2 || t.maxOverrideCapacity !== 3)) {
+              t.capacity = 2;
+              t.maxOverrideCapacity = 3;
+              modified = true;
+            }
+            // If placeholder URL is present, replace with real URL
+            if (t.orderingUrl && (t.orderingUrl.includes('example.com') || t.orderingUrl.includes('table-6') || t.orderingUrl.includes('table-7'))) {
+              t.orderingUrl = initial.orderingUrl;
+              modified = true;
+            }
+            // Tables 6 and 7 should have empty orderingUrls
+            if ((t.id === 6 || t.id === 7) && t.orderingUrl !== '') {
+              t.orderingUrl = '';
+              modified = true;
+            }
+          }
+          if (modified) {
+            needsUpdate = true;
+          }
+          return t;
+        });
+
+        if (needsUpdate) {
+          console.log("Auto-healing tables to real Square URLs and activating Table 7...");
+          const batch = writeBatch(db);
+          for (const t of updatedTables) {
+            batch.set(doc(db, 'tables', t.id.toString()), sanitizeData(t), { merge: true });
+          }
+          await safeCommitBatch(batch);
+        }
+
         tables.sort((a, b) => a.id - b.id);
         cachedTables = tables;
         notifyListeners();

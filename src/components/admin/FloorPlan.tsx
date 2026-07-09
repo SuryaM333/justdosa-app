@@ -228,10 +228,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       table = {
         id: tableId,
         name: `Table ${tableId}`,
-        capacity: (tableId === 5 || tableId === 6 || tableId === 7) ? 6 : 2,
-        maxOverrideCapacity: (tableId === 5 || tableId === 6 || tableId === 7) ? 6 : 2,
+        capacity: (tableId === 5 || tableId === 6 || tableId === 7) ? 2 : 6,
+        maxOverrideCapacity: (tableId === 5 || tableId === 6 || tableId === 7) ? 3 : 6,
         isOccupied: false,
-        isInactive: tableId === 7,
+        isInactive: false,
         position: getTableDefaultPosition(tableId),
       };
     }
