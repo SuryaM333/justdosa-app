@@ -12,8 +12,10 @@ import {
   onSnapshot, 
   runTransaction,
   writeBatch,
-  deleteDoc
+  deleteDoc,
+  deleteField
 } from 'firebase/firestore';
+import { hashPin } from '../utils/crypto';
 
 // ----------------------------------------------------
 // FIREBASE FIRESTORE INITIALIZATION
@@ -130,6 +132,10 @@ let cachedTables: Table[] = [];
 let cachedBookings: Booking[] = [];
 let cachedCustomers: Record<string, Customer> = {};
 let cachedSettings: any = null;
+let cachedPins = {
+  staffPinHash: 'f3e055913a0b1eb0f07317896f9a1bc466b9a50db85a7f882f3ffde9ffb23aca',
+  ownerPinHash: 'a1fb4e703a9ef1fa4936801721ff285a97ac85330856674412e054892afe6972',
+};
 
 type Listener = () => void;
 const listeners: Set<Listener> = new Set();
@@ -145,8 +151,6 @@ function notifyListeners() {
 // SEED DATA TEMPLATES
 // ----------------------------------------------------
 const DEFAULT_SETTINGS = {
-  staffPin: '1357',
-  ownerPin: '2468',
   whatsappNumber: '0412345678',
   kalyanaCapacity: 40,
   lunchStartTime: '11:00',
@@ -198,6 +202,52 @@ const INITIAL_TABLES: Table[] = [
   { id: 10, name: 'Table 10', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://example.com/order?table=10', position: { column: 'left', order: 1 } },
 ];
 
+async function migratePlaintextPins() {
+  try {
+    const globalDocRef = doc(db, 'settings', 'global');
+    const globalSnap = await getDoc(globalDocRef);
+    
+    let plainStaff = '1357';
+    let plainOwner = '2468';
+    let hasPlaintext = false;
+
+    if (globalSnap.exists()) {
+      const globalData = globalSnap.data();
+      if (globalData.staffPin) {
+        plainStaff = globalData.staffPin;
+        hasPlaintext = true;
+      }
+      if (globalData.ownerPin) {
+        plainOwner = globalData.ownerPin;
+        hasPlaintext = true;
+      }
+    }
+
+    // Hash the plain text PINs
+    const staffHash = await hashPin(plainStaff);
+    const ownerHash = await hashPin(plainOwner);
+
+    // Save them to settings_secure/pins
+    const securePinsDocRef = doc(db, 'settings_secure', 'pins');
+    await setDoc(securePinsDocRef, {
+      staffPinHash: staffHash,
+      ownerPinHash: ownerHash
+    });
+
+    // Remove plaintext PINs from the old settings document
+    if (hasPlaintext) {
+      await setDoc(globalDocRef, {
+        staffPin: deleteField(),
+        ownerPin: deleteField()
+      }, { merge: true });
+    }
+
+    console.log("Migration of secure PINs completed successfully.");
+  } catch (err) {
+    console.error("Error migrating plaintext PINs: ", err);
+  }
+}
+
 // ----------------------------------------------------
 // REAL-TIME FIRESTORE SYNCHRONIZATION ENGINE
 // ----------------------------------------------------
@@ -222,6 +272,27 @@ function initFirestoreSync() {
     }
   }, (error) => {
     handleFirestoreError(error, OperationType.GET, 'settings/global');
+  });
+
+  // 1b. Secure PINs Document Listener
+  const securePinsDocRef = doc(db, 'settings_secure', 'pins');
+  onSnapshot(securePinsDocRef, async (docSnap) => {
+    try {
+      if (!docSnap.exists() || !docSnap.data()?.staffPinHash || !docSnap.data()?.ownerPinHash) {
+        await migratePlaintextPins();
+      } else {
+        const data = docSnap.data();
+        cachedPins = {
+          staffPinHash: data?.staffPinHash || 'f3e055913a0b1eb0f07317896f9a1bc466b9a50db85a7f882f3ffde9ffb23aca',
+          ownerPinHash: data?.ownerPinHash || 'a1fb4e703a9ef1fa4936801721ff285a97ac85330856674412e054892afe6972',
+        };
+        notifyListeners();
+      }
+    } catch (err) {
+      console.error("Error in secure pins sync: ", err);
+    }
+  }, (error) => {
+    handleFirestoreError(error, OperationType.GET, 'settings_secure/pins');
   });
 
   // 2. Tables Collection Listener
@@ -310,27 +381,39 @@ export const dataService = {
   },
 
   getStaffPin(): string {
-    return cachedSettings?.staffPin || '1357';
+    return '';
   },
 
   getOwnerPin(): string {
-    return cachedSettings?.ownerPin || '2468';
+    return '';
   },
 
   async setStaffPin(pin: string) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { staffPin: pin }, { merge: true });
+      const hash = await hashPin(pin);
+      await safeSetDoc(doc(db, 'settings_secure', 'pins'), { staffPinHash: hash }, { merge: true });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+      handleFirestoreError(error, OperationType.WRITE, 'settings_secure/pins');
     }
   },
 
   async setOwnerPin(pin: string) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { ownerPin: pin }, { merge: true });
+      const hash = await hashPin(pin);
+      await safeSetDoc(doc(db, 'settings_secure', 'pins'), { ownerPinHash: hash }, { merge: true });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+      handleFirestoreError(error, OperationType.WRITE, 'settings_secure/pins');
     }
+  },
+
+  async verifyStaffPin(pin: string): Promise<boolean> {
+    const hash = await hashPin(pin);
+    return hash === cachedPins.staffPinHash;
+  },
+
+  async verifyOwnerPin(pin: string): Promise<boolean> {
+    const hash = await hashPin(pin);
+    return hash === cachedPins.ownerPinHash;
   },
 
   async saveAllSettings(settings: any) {

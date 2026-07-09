@@ -39,9 +39,6 @@ export const PINModal: React.FC<PINModalProps> = ({
 
   const prefersReducedMotion = usePrefersReducedMotion();
 
-  const staffPin = dataService.getStaffPin();
-  const ownerPin = dataService.getOwnerPin();
-
   const handleLogoClick = () => {
     const next = logoTaps + 1;
     if (next >= 5) {
@@ -91,17 +88,29 @@ export const PINModal: React.FC<PINModalProps> = ({
       // Auto-submit when exactly 4 digits are entered
       if (nextPin.length === 4) {
         setIsVerifying(true);
-        setTimeout(() => {
-          if (nextPin === ownerPin) {
-            onSuccess('owner');
-            setPin('');
-          } else if (nextPin === staffPin) {
-            onSuccess('staff');
-            setPin('');
-          } else {
+        setTimeout(async () => {
+          try {
+            const isOwner = await dataService.verifyOwnerPin(nextPin);
+            const isStaff = await dataService.verifyStaffPin(nextPin);
+
+            if (isOwner) {
+              onSuccess('owner');
+              setPin('');
+            } else if (isStaff) {
+              onSuccess('staff');
+              setPin('');
+            } else {
+              setError(true);
+              setIsVerifying(false);
+              // Shake effect will trigger, reset PIN after shake
+              setTimeout(() => {
+                setPin('');
+              }, 800);
+            }
+          } catch (err) {
+            console.error("Error verifying PIN: ", err);
             setError(true);
             setIsVerifying(false);
-            // Shake effect will trigger, reset PIN after shake
             setTimeout(() => {
               setPin('');
             }, 800);

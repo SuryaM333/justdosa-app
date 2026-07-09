@@ -26,8 +26,8 @@ export const SettingsTab: React.FC = () => {
   const [activeSubTab, setActiveSubTab] = useState<'hours' | 'kalyana' | 'tables' | 'texts' | 'security' | 'device'>('hours');
 
   // Form states initialized with live data from dataService
-  const [staffPin, setStaffPin] = useState(() => dataService.getStaffPin());
-  const [ownerPin, setOwnerPin] = useState(() => dataService.getOwnerPin());
+  const [staffPin, setStaffPin] = useState('');
+  const [ownerPin, setOwnerPin] = useState('');
   const [whatsappNumber, setWhatsappNumber] = useState(() => dataService.getWhatsAppNumber());
   const [lunchBuffer, setLunchBuffer] = useState(() => dataService.getLunchBuffer().toString());
   const [dinnerBuffer, setDinnerBuffer] = useState(() => dataService.getDinnerBuffer().toString());
@@ -60,8 +60,6 @@ export const SettingsTab: React.FC = () => {
 
   useEffect(() => {
     const loadFromService = () => {
-      setStaffPin(dataService.getStaffPin());
-      setOwnerPin(dataService.getOwnerPin());
       setWhatsappNumber(dataService.getWhatsAppNumber());
       setLunchBuffer(dataService.getLunchBuffer().toString());
       setDinnerBuffer(dataService.getDinnerBuffer().toString());
@@ -110,11 +108,11 @@ export const SettingsTab: React.FC = () => {
   };
 
   const validateAll = (): string | null => {
-    // 1. PINs (4-6 digits, numeric)
-    if (staffPin.length < 4 || staffPin.length > 6 || !/^\d+$/.test(staffPin)) {
+    // 1. PINs (4-6 digits, numeric, if provided)
+    if (staffPin && (staffPin.length < 4 || staffPin.length > 6 || !/^\d+$/.test(staffPin))) {
       return 'Staff PIN must be between 4 and 6 numeric digits.';
     }
-    if (ownerPin.length < 4 || ownerPin.length > 6 || !/^\d+$/.test(ownerPin)) {
+    if (ownerPin && (ownerPin.length < 4 || ownerPin.length > 6 || !/^\d+$/.test(ownerPin))) {
       return 'Manager/Founder PIN must be between 4 and 6 numeric digits.';
     }
 
@@ -222,10 +220,8 @@ export const SettingsTab: React.FC = () => {
         }
       }
 
-      // 1. Save all settings to Firestore settings document
+      // 1. Save all settings to Firestore settings document (excluding plaintext PINs)
       const payload = {
-        staffPin,
-        ownerPin,
         whatsappNumber,
         lunchBuffer: parseInt(lunchBuffer, 10) || 0,
         dinnerBuffer: parseInt(dinnerBuffer, 10) || 0,
@@ -242,6 +238,18 @@ export const SettingsTab: React.FC = () => {
       };
 
       await dataService.saveAllSettings(payload);
+
+      // If a new Staff PIN was typed, save its hash and clear input
+      if (staffPin) {
+        await dataService.setStaffPin(staffPin);
+        setStaffPin('');
+      }
+
+      // If a new Manager PIN was typed, save its hash and clear input
+      if (ownerPin) {
+        await dataService.setOwnerPin(ownerPin);
+        setOwnerPin('');
+      }
 
       // 2. Save table configurations to Firestore
       const cleanedTables = tables.map((t) => ({
@@ -1077,7 +1085,7 @@ export const SettingsTab: React.FC = () => {
                       maxLength={6}
                       value={staffPin}
                       onChange={(e) => setStaffPin(e.target.value)}
-                      placeholder="Enter Staff PIN"
+                      placeholder="•••• (Leave blank to keep current)"
                       className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-sm font-mono text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
                     />
                     <span className="text-[10px] text-[#6B5E4C]/80 dark:text-[#B8ACA0]/80 block">
@@ -1094,7 +1102,7 @@ export const SettingsTab: React.FC = () => {
                       maxLength={6}
                       value={ownerPin}
                       onChange={(e) => setOwnerPin(e.target.value)}
-                      placeholder="Enter Manager PIN"
+                      placeholder="•••• (Leave blank to keep current)"
                       className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-sm font-mono text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
                     />
                     <span className="text-[10px] text-[#6B5E4C]/80 dark:text-[#B8ACA0]/80 block">
