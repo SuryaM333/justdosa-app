@@ -31,8 +31,26 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [mergeMode, setMergeMode] = useState(false);
   const [mergeFirstTableId, setMergeFirstTableId] = useState<number | null>(null);
 
+  const getTableDefaultPosition = (id: number) => {
+    switch (id) {
+      case 1: return { column: 'right' as const, order: 3 };
+      case 2: return { column: 'right' as const, order: 2 };
+      case 3: return { column: 'right' as const, order: 1 };
+      case 4: return { column: 'top' as const, order: 1 };
+      case 5: return { column: 'middle' as const, order: 1, isDiamond: true };
+      case 6: return { column: 'middle' as const, order: 2, isDiamond: true };
+      case 7: return { column: 'middle' as const, order: 3, isDiamond: true };
+      case 8: return { column: 'left' as const, order: 3 };
+      case 9: return { column: 'left' as const, order: 2 };
+      case 10: return { column: 'left' as const, order: 1 };
+      default: return { column: 'right' as const, order: 1 };
+    }
+  };
+
   const areTablesAdjacent = (t1: Table, t2: Table): boolean => {
-    if (t1.position.column === t2.position.column && Math.abs(t1.position.order - t2.position.order) === 1) {
+    const p1 = t1.position || getTableDefaultPosition(t1.id);
+    const p2 = t2.position || getTableDefaultPosition(t2.id);
+    if (p1 && p2 && p1.column === p2.column && Math.abs(p1.order - p2.order) === 1) {
       return true;
     }
     if (Math.abs(t1.id - t2.id) === 1) {
@@ -205,11 +223,22 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
   // Helper to render table box
   const renderTableNode = (tableId: number) => {
-    const table = tables.find((t) => t.id === tableId);
-    if (!table) return null;
+    let table = tables.find((t) => t.id === tableId);
+    if (!table) {
+      table = {
+        id: tableId,
+        name: `Table ${tableId}`,
+        capacity: (tableId === 5 || tableId === 6 || tableId === 7) ? 6 : 2,
+        maxOverrideCapacity: (tableId === 5 || tableId === 6 || tableId === 7) ? 6 : 2,
+        isOccupied: false,
+        isInactive: tableId === 7,
+        position: getTableDefaultPosition(tableId),
+      };
+    }
 
     const booking = getTableBooking(table);
-    const isDiamond = table.position.isDiamond;
+    const position = table.position || getTableDefaultPosition(table.id);
+    const isDiamond = position?.isDiamond || false;
     const requiredSeats = selectedWaitingBooking ? getRequiredTableSeats(selectedWaitingBooking) : 0;
     const isSelectedTarget = selectedWaitingBooking && !table.isOccupied && !table.isInactive && (
       requiredSeats <= table.capacity || 
@@ -320,7 +349,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               <div className="flex items-center gap-1 text-[10px] text-[#6B5E4C] dark:text-[#B8ACA0] mt-0.5 font-medium">
                 <Users className="w-3 h-3" />
                 <span>
-                  Cap: {table.mergedWith ? table.capacity + (tables.find(t => t.id === table.mergedWith)?.capacity || 0) : table.capacity}
+                  Cap: {table.mergedWith ? table.capacity + (tables.find(t => t.id === Number(table.mergedWith))?.capacity || 0) : table.capacity}
                   {!table.mergedWith && table.maxOverrideCapacity > table.capacity ? ' (+1)' : ''}
                 </span>
               </div>
@@ -739,7 +768,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        const otherMerged = quickSeatModal.mergedWith ? tables.find(t => t.id === quickSeatModal.mergedWith) : null;
+                        const otherMerged = quickSeatModal.mergedWith ? tables.find(t => t.id === Number(quickSeatModal.mergedWith)) : null;
                         const maxCap = otherMerged ? quickSeatModal.capacity + otherMerged.capacity : quickSeatModal.maxOverrideCapacity;
                         setQuickSeatPartySize((prev) => Math.min(maxCap, prev + 1));
                       }}

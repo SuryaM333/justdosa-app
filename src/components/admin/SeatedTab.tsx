@@ -97,9 +97,16 @@ export const SeatedTab: React.FC<SeatedTabProps> = ({ bookings, tables, onRefres
                             return null;
                           })()}
                         </div>
-                        <span className="text-[11px] text-[#6B5E4C] dark:text-[#B8ACA0] font-medium">
-                          {table ? table.name : `Table ${booking.tableId}`} ({table?.capacity || 6} seats)
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-[#6B5E4C] dark:text-[#B8ACA0] font-medium">
+                            {table ? table.name : `Table ${booking.tableId}`} ({table?.capacity || 6} seats)
+                          </span>
+                          {booking.handledBy && (
+                            <span className="text-[9px] uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-extrabold bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                              Seated by {booking.handledBy}
+                            </span>
+                          )}
+                        </div>
 
                         <div className="flex items-center gap-1.5 mt-1 text-[11px]">
                           <span className="text-zinc-500">Server:</span>

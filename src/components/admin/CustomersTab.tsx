@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
 import { Search, ArrowUpDown, MessageSquare, ExternalLink, Sparkles, AlertTriangle, CheckCircle2, XCircle, Trash2, GitMerge, Edit3, ShieldAlert } from 'lucide-react';
-import { Customer } from '../../types';
+import { Customer, Booking } from '../../types';
 import { getWhatsAppUrl } from '../../utils/phone';
 import { dataService } from '../../services/dataService';
 
 interface CustomersTabProps {
   customers: Record<string, Customer>;
+  bookings?: Booking[];
   adminRole?: 'staff' | 'owner';
   onRefresh?: () => void;
 }
 
-export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, adminRole, onRefresh }) => {
+export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings, adminRole, onRefresh }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'visits' | 'lastVisit' | 'name'>('visits');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
@@ -250,6 +251,54 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, adminRole
                               <span>{cust.notes}</span>
                             </span>
                           )}
+                        </div>
+                      )}
+
+                      {/* Past Visits / Booking History */}
+                      {bookings && bookings.filter(b => b.phone === cust.phone).length > 0 && (
+                        <div className="mt-2.5 pt-2 border-t border-dashed border-[#E8E2D2] dark:border-[#3D352E]/65 max-w-lg">
+                          <span className="text-[10px] uppercase font-bold text-[#6B5E4C] dark:text-[#B8ACA0] block mb-1">
+                            Visit History & Staff Logs
+                          </span>
+                          <div className="flex flex-col gap-1 max-h-24 overflow-y-auto pr-1">
+                            {bookings
+                              .filter(b => b.phone === cust.phone)
+                              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                              .map(b => (
+                                <div key={b.id} className="flex items-center justify-between text-[11px] bg-[#F5F2EA]/40 dark:bg-[#1C1917]/40 px-2 py-1 rounded border border-[#E8E2D2]/50 dark:border-[#3D352E]/30">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-mono text-[#E37A08] font-bold">
+                                      {b.bookingDate || formatDate(b.createdAt)}
+                                    </span>
+                                    <span className="text-zinc-400">•</span>
+                                    <span className="font-semibold text-zinc-700 dark:text-zinc-300">
+                                      Party of {b.partySize}
+                                    </span>
+                                    {b.tableId && (
+                                      <span className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 px-1 rounded text-[10px] font-bold">
+                                        T{b.tableId}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={`px-1 py-0.5 rounded text-[9px] font-bold uppercase ${
+                                      b.status === 'finished' || b.status === 'seated'
+                                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                        : b.status === 'no-show'
+                                        ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/40 dark:text-rose-300'
+                                        : 'bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-300'
+                                    }`}>
+                                      {b.status}
+                                    </span>
+                                    {b.handledBy && (
+                                      <span className="text-zinc-500 text-[10px] italic">
+                                        by {b.handledBy}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
                         </div>
                       )}
                     </div>

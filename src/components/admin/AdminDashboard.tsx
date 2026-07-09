@@ -28,6 +28,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole, onRes
   const [isOnline, setIsOnline] = useState(dataService.isOnline());
   const [toast, setToast] = useState<string | null>(null);
 
+  const [staffName, setStaffName] = useState<string>(() => {
+    if (adminRole === 'owner') {
+      return 'Manager';
+    }
+    return sessionStorage.getItem('just_dosa_staff_name') || '';
+  });
+
+  const staffList = dataService.getStaffList();
+  const shouldShowStaffGrid = adminRole === 'staff' && !staffName && staffList.length > 0;
+
+  useEffect(() => {
+    if (adminRole === 'owner') {
+      sessionStorage.setItem('just_dosa_staff_name', 'Manager');
+      setStaffName('Manager');
+    } else {
+      const stored = sessionStorage.getItem('just_dosa_staff_name') || '';
+      setStaffName(stored);
+    }
+  }, [adminRole]);
+
   const prevPendingIdsRef = useRef<string[]>([]);
 
   // Real-time tab title badge count (e.g. "(3) Just Dosa") & Sound/vibration chime
@@ -145,6 +165,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole, onRes
 
   const stats = dataService.getDailyStats();
 
+  if (shouldShowStaffGrid) {
+    return (
+      <div className="min-h-[calc(100vh-4rem)] bg-[#FFFDF7] dark:bg-[#1C1917] flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-white dark:bg-[#26221E] rounded-3xl p-8 shadow-xl border border-[#E8E2D2] dark:border-[#3D352E] text-center space-y-6">
+          <div className="space-y-2">
+            <span className="text-3xl block">🙏</span>
+            <h2 className="text-2xl font-serif font-extrabold text-[#2D2926] dark:text-white tracking-tight">
+              Who's working?
+            </h2>
+            <p className="text-sm text-[#6B5E4C] dark:text-[#B8ACA0]">
+              Select your name to start the service session.
+            </p>
+          </div>
+          
+          <div className="grid grid-cols-2 gap-4">
+            {staffList.map((name) => (
+              <button
+                key={name}
+                onClick={() => {
+                  sessionStorage.setItem('just_dosa_staff_name', name);
+                  setStaffName(name);
+                }}
+                className="p-4 text-center text-sm font-bold rounded-2xl bg-[#F5F2EA] hover:bg-[#E8E2D2] dark:bg-[#1C1917] dark:hover:bg-[#3D352E] text-[#2D2926] dark:text-[#D2B48C] border border-[#E8E2D2] dark:border-[#3D352E] transition-all hover:scale-[1.02] active:scale-95 shadow-xs flex flex-col items-center justify-center gap-1.5 min-h-[4.5rem]"
+              >
+                <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>{name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-[#FFFDF7] dark:bg-[#1C1917] py-6 px-4 sm:px-6 lg:px-8">
       <div className="max-w-7xl mx-auto space-y-6">
@@ -176,6 +230,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole, onRes
             <p className="text-xs sm:text-sm text-[#6B5E4C] dark:text-[#B8ACA0]">
               Manage tables, live queue allocations, WhatsApp notifications, and Customer Data.
             </p>
+            {adminRole === 'staff' && staffName && (
+              <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-2 flex items-center gap-2">
+                <span>Staff: <strong className="font-extrabold">{staffName}</strong></span>
+                <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">•</span>
+                <button
+                  onClick={() => {
+                    sessionStorage.removeItem('just_dosa_staff_name');
+                    setStaffName('');
+                  }}
+                  className="px-2 py-0.5 rounded-md bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 transition-all border border-emerald-500/20 text-[10px] cursor-pointer"
+                >
+                  Switch User
+                </button>
+              </div>
+            )}
+            {adminRole === 'owner' && (
+              <div className="text-xs font-semibold text-[#E37A08] mt-2">
+                Manager: <strong className="font-extrabold">Manager</strong>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -366,7 +440,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole, onRes
           )}
 
           {activeTab === 'customers' && adminRole === 'owner' && (
-            <CustomersTab customers={customers} adminRole={adminRole} onRefresh={loadData} />
+            <CustomersTab customers={customers} bookings={bookings} adminRole={adminRole} onRefresh={loadData} />
           )}
 
           {activeTab === 'summary' && adminRole === 'owner' && <SummaryTab stats={stats} />}

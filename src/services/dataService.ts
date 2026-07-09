@@ -97,6 +97,18 @@ export function sanitizeData<T>(obj: T): T {
   return obj;
 }
 
+export function getSessionHandledBy(): string | undefined {
+  if (typeof window !== 'undefined' && typeof sessionStorage !== 'undefined') {
+    const role = sessionStorage.getItem('just_dosa_admin_role');
+    if (role === 'owner') {
+      return 'Manager';
+    }
+    const name = sessionStorage.getItem('just_dosa_staff_name');
+    return name || undefined;
+  }
+  return undefined;
+}
+
 async function safeSetDoc(docRef: any, data: any, options?: any) {
   const sanitized = sanitizeData(data);
   if (options) {
@@ -1238,7 +1250,7 @@ export const dataService = {
     return (waitingCount + 1) * 15;
   },
 
-  async allocateTable(bookingId: string, tableId: number): Promise<{ success: boolean; error?: string }> {
+  async allocateTable(bookingId: string, tableId: number, handledBy?: string): Promise<{ success: boolean; error?: string }> {
     try {
       const result = await safeRunTransaction(db, async (transaction) => {
         const tableDocRef = doc(db, 'tables', tableId.toString());
@@ -1293,12 +1305,18 @@ export const dataService = {
           }));
         }
 
-        transaction.update(bookingDocRef, sanitizeData({
+        const bookingUpdate: any = {
           status: 'seated',
           tableId: tableId,
           seatedAt: new Date().toISOString(),
           isNewAlert: false
-        }));
+        };
+        const handledByVal = handledBy || getSessionHandledBy();
+        if (handledByVal) {
+          bookingUpdate.handledBy = handledByVal;
+        }
+
+        transaction.update(bookingDocRef, sanitizeData(bookingUpdate));
 
         return { success: true };
       });
@@ -1320,7 +1338,7 @@ export const dataService = {
     }
   },
 
-  async finishSeatedParty(tableId: number): Promise<void> {
+  async finishSeatedParty(tableId: number, handledBy?: string): Promise<void> {
     try {
       const tableDocRef = doc(db, 'tables', tableId.toString());
       const tableSnap = await getDoc(tableDocRef);
@@ -1336,10 +1354,16 @@ export const dataService = {
         const booking = bookingSnap.data() as Booking;
         const finishedAt = new Date().toISOString();
 
-        await safeSetDoc(bookingDocRef, {
+        const bookingUpdate: any = {
           status: 'finished',
           finishedAt
-        }, { merge: true });
+        };
+        const handledByVal = handledBy || getSessionHandledBy();
+        if (handledByVal) {
+          bookingUpdate.handledBy = handledByVal;
+        }
+
+        await safeSetDoc(bookingDocRef, bookingUpdate, { merge: true });
 
         const cleaned = cleanPhoneNumber(booking.phone);
         const customerDocRef = doc(db, 'customers', cleaned);
@@ -1484,12 +1508,17 @@ export const dataService = {
     }
   },
 
-  async confirmBooking(bookingId: string) {
+  async confirmBooking(bookingId: string, handledBy?: string) {
     try {
-      await safeSetDoc(doc(db, 'bookings', bookingId), {
+      const bookingUpdate: any = {
         status: 'confirmed',
         isNewAlert: false
-      }, { merge: true });
+      };
+      const handledByVal = handledBy || getSessionHandledBy();
+      if (handledByVal) {
+        bookingUpdate.handledBy = handledByVal;
+      }
+      await safeSetDoc(doc(db, 'bookings', bookingId), bookingUpdate, { merge: true });
       await this.syncSlotOccupancyForBookingId(bookingId);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
@@ -1536,7 +1565,7 @@ export const dataService = {
     }
   },
 
-  async seatWalkInDirectly(tableId: number, partySize: number, name = 'Walk-In', phone = '0400 000 000', childSeats = 0): Promise<{ success: boolean; error?: string }> {
+  async seatWalkInDirectly(tableId: number, partySize: number, name = 'Walk-In', phone = '0400 000 000', childSeats = 0, handledBy?: string): Promise<{ success: boolean; error?: string }> {
     try {
       const tableDocRef = doc(db, 'tables', tableId.toString());
       const tableSnap = await getDoc(tableDocRef);
@@ -1546,6 +1575,7 @@ export const dataService = {
       if (table.isInactive) return { success: false, error: 'Table is inactive' };
 
       const bookingId = `bk-direct-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
+      const handledByVal = handledBy || getSessionHandledBy();
       const newBooking: Booking = {
         id: bookingId,
         phone: formatAusMobile(phone),
@@ -1562,6 +1592,7 @@ export const dataService = {
         branchId: 'millpark',
         bookingDate: null,
         bookingTime: null,
+        ...(handledByVal ? { handledBy: handledByVal } : {})
       };
 
       await safeSetDoc(doc(db, 'bookings', bookingId), newBooking);
@@ -1580,15 +1611,20 @@ export const dataService = {
     }
   },
 
-  async markBookingNoShow(bookingId: string) {
+  async markBookingNoShow(bookingId: string, handledBy?: string) {
     try {
       const docRef = doc(db, 'bookings', bookingId);
       const snap = await getDoc(docRef);
       if (snap.exists()) {
         const booking = snap.data() as Booking;
-        await safeSetDoc(docRef, {
+        const bookingUpdate: any = {
           status: 'no-show'
-        }, { merge: true });
+        };
+        const handledByVal = handledBy || getSessionHandledBy();
+        if (handledByVal) {
+          bookingUpdate.handledBy = handledByVal;
+        }
+        await safeSetDoc(docRef, bookingUpdate, { merge: true });
 
         const cleaned = cleanPhoneNumber(booking.phone);
         const customerDocRef = doc(db, 'customers', cleaned);

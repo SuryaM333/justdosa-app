@@ -188,6 +188,7 @@ export default function App() {
     sessionStorage.removeItem('just_dosa_admin_auth');
     sessionStorage.removeItem('just_dosa_admin_role');
     sessionStorage.removeItem('just_dosa_admin_auth_time');
+    sessionStorage.removeItem('just_dosa_staff_name');
     setIsAdminAuthenticated(false);
     setAdminRole(null);
     window.history.replaceState({}, '', '/#/admin');

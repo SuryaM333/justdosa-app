@@ -55,6 +55,7 @@ export interface Booking {
   notes?: string;
   allergies?: string;
   serverName?: string;
+  handledBy?: string;
 }
 
 export interface Table {
