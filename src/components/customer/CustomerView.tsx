@@ -90,28 +90,6 @@ export const CustomerView: React.FC = () => {
   const [notes, setNotes] = useState('');
   const [showNotesField, setShowNotesField] = useState(false);
 
-  // 5-tap gesture states
-  const [logoClicks, setLogoClicks] = useState(0);
-  const [lastClickTime, setLastClickTime] = useState(0);
-
-  const handleLogoClick = () => {
-    const isCustomerOnly = (import.meta as any).env.VITE_APP_MODE === 'customer';
-    if (isCustomerOnly) return;
-
-    const now = Date.now();
-    if (now - lastClickTime < 2000) {
-      const nextClicks = logoClicks + 1;
-      setLogoClicks(nextClicks);
-      if (nextClicks >= 5) {
-        setLogoClicks(0);
-        window.location.hash = '/admin';
-      }
-    } else {
-      setLogoClicks(1);
-    }
-    setLastClickTime(now);
-  };
-
   const getDayOfWeek = (dateStr: string) => {
     if (!dateStr) return -1;
     const parts = dateStr.split('-');
@@ -1043,10 +1021,7 @@ export const CustomerView: React.FC = () => {
 
           {/* Welcome Header */}
           <motion.div variants={itemVariants} className="text-center mb-8">
-            <div 
-              className="w-56 h-56 mx-auto mb-2 flex items-center justify-center bg-transparent shrink-0 cursor-pointer select-none"
-              onClick={handleLogoClick}
-            >
+            <div className="w-56 h-56 mx-auto mb-2 flex items-center justify-center bg-transparent shrink-0 select-none">
               <img src={LOGO_BASE64} alt="Just Dosa Logo" className="w-full h-full object-contain drop-shadow-md animate-[pulse_3s_infinite]" referrerPolicy="no-referrer" />
             </div>
             <span className="inline-block px-3 py-1 rounded-md bg-[#F5F2EA] dark:bg-[#26221E] text-[#8B4513] dark:text-[#D2B48C] border border-[#E8E2D2] dark:border-[#3D352E] text-xs font-bold uppercase tracking-widest mb-2">

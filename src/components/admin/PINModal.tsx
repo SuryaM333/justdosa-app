@@ -35,32 +35,14 @@ export const PINModal: React.FC<PINModalProps> = ({
   const [error, setError] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [step, setStep] = useState<'intro' | 'lock' | 'pin'>('intro');
-  const [logoTaps, setLogoTaps] = useState(0);
 
   const prefersReducedMotion = usePrefersReducedMotion();
-
-  const handleLogoClick = () => {
-    const next = logoTaps + 1;
-    if (next >= 5) {
-      localStorage.removeItem('just_dosa_admin_device_v2');
-      localStorage.removeItem('just_dosa_admin_device');
-      sessionStorage.removeItem('just_dosa_admin_auth');
-      sessionStorage.removeItem('just_dosa_admin_role');
-      sessionStorage.removeItem('just_dosa_admin_auth_time');
-      onClose();
-      window.location.href = window.location.origin + '/';
-      setLogoTaps(0);
-    } else {
-      setLogoTaps(next);
-    }
-  };
 
   useEffect(() => {
     if (isOpen) {
       setPin('');
       setError(false);
       setIsVerifying(false);
-      setLogoTaps(0);
 
       const skipIntro = sessionStorage.getItem('just_dosa_skip_welcome_intro') === 'true';
       if (skipIntro) {
@@ -202,8 +184,7 @@ export const PINModal: React.FC<PINModalProps> = ({
                 <img 
                   src={LOGO_BASE64} 
                   alt="Just Dosa Logo" 
-                  onClick={handleLogoClick}
-                  className="w-28 h-28 sm:w-32 sm:h-32 mx-auto drop-shadow-2xl relative cursor-pointer active:scale-95 transition-transform" 
+                  className="w-28 h-28 sm:w-32 sm:h-32 mx-auto drop-shadow-2xl relative select-none" 
                   referrerPolicy="no-referrer"
                 />
               </motion.div>
@@ -239,13 +220,13 @@ export const PINModal: React.FC<PINModalProps> = ({
                 initial={{ opacity: 0, y: prefersReducedMotion ? 0 : 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={prefersReducedMotion ? { duration: 0.4, delay: 0.6 } : { type: 'spring', damping: 20, stiffness: 120, delay: 0.6 }}
-                className="mt-12 w-full flex justify-center"
+                className="mt-12 w-full flex flex-col items-center gap-3.5"
               >
                 <motion.button
                   whileHover={{ scale: prefersReducedMotion ? 1 : 1.03 }}
                   whileTap={{ scale: prefersReducedMotion ? 1 : 0.97 }}
                   onClick={() => setStep('pin')}
-                  className="relative flex items-center justify-center gap-2 px-14 py-4 rounded-2xl bg-gradient-to-r from-[#E37A08] via-[#FF9F3B] to-[#E37A08] text-white font-bold text-lg tracking-wider shadow-xl shadow-amber-950/40 border border-[#FFAB4A]/20 overflow-hidden cursor-pointer group"
+                  className="relative flex items-center justify-center gap-2 px-14 py-4 rounded-2xl bg-gradient-to-r from-[#E37A08] via-[#FF9F3B] to-[#E37A08] text-white font-bold text-lg tracking-wider shadow-xl shadow-amber-950/40 border border-[#FFAB4A]/20 overflow-hidden cursor-pointer group w-full max-w-xs"
                 >
                   {/* Shimmer element */}
                   {!prefersReducedMotion && (
@@ -264,6 +245,16 @@ export const PINModal: React.FC<PINModalProps> = ({
                   )}
                   <Lock className="w-5 h-5 mr-1 text-white/90 group-hover:rotate-12 transition-transform duration-200" />
                   <span>Login</span>
+                </motion.button>
+
+                <motion.button
+                  whileHover={{ scale: prefersReducedMotion ? 1 : 1.03 }}
+                  whileTap={{ scale: prefersReducedMotion ? 1 : 0.97 }}
+                  onClick={onClose}
+                  className="flex items-center justify-center gap-2 px-10 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white/80 hover:text-white font-semibold text-sm border border-white/10 transition-all cursor-pointer w-full max-w-xs"
+                >
+                  <ArrowLeft className="w-4 h-4" />
+                  <span>Back to Main Menu</span>
                 </motion.button>
               </motion.div>
             </motion.div>

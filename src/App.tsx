@@ -5,6 +5,7 @@ import { AdminDashboard } from './components/admin/AdminDashboard';
 import { PINModal } from './components/admin/PINModal';
 import { dataService } from './services/dataService';
 import { Booking, AdminRole } from './types';
+import { LOGO_BASE64 } from './components/logoBase64';
 
 export default function App() {
   const isCustomerOnly = (import.meta as any).env.VITE_APP_MODE === 'customer';
@@ -68,9 +69,12 @@ export default function App() {
     return null;
   });
   
-  // 5-tap gesture states for Navbar brand logo
-  const [logoClicks, setLogoClicks] = useState<number>(0);
-  const [lastClickTime, setLastClickTime] = useState<number>(0);
+  const [modeChoice, setModeChoice] = useState<'customer' | null>(() => {
+    if (isCustomerOnly) {
+      return 'customer';
+    }
+    return (sessionStorage.getItem('just_dosa_mode_choice') as 'customer' | null) || null;
+  });
 
   const isDarkMode = true;
   const [unreadCount, setUnreadCount] = useState(0);
@@ -226,30 +230,14 @@ export default function App() {
   };
 
   const handlePinClose = () => {
+    sessionStorage.removeItem('just_dosa_mode_choice');
+    setModeChoice(null);
     window.history.pushState({}, '', '/');
     setPathname('/');
     setHash('');
   };
 
   const handleNavigateHome = () => {
-    if (!isCustomerOnly) {
-      const now = Date.now();
-      if (now - lastClickTime < 2000) {
-        const nextClicks = logoClicks + 1;
-        setLogoClicks(nextClicks);
-        if (nextClicks >= 5) {
-          setLogoClicks(0);
-          window.history.pushState({}, '', '/#/admin');
-          setPathname('/');
-          setHash('#/admin');
-          return;
-        }
-      } else {
-        setLogoClicks(1);
-      }
-      setLastClickTime(now);
-    }
-
     window.history.pushState({}, '', '/');
     setPathname('/');
     setHash('');
@@ -274,15 +262,19 @@ export default function App() {
     setTimeout(() => setToastMsg(null), 3000);
   };
 
+  const isModeChoiceActive = !isCustomerOnly && !isAdminRoute && !isAdminAuthenticated && !showStaffChoice && modeChoice !== 'customer';
+
   return (
     <div className="min-h-screen font-sans antialiased bg-[#1C1917] text-[#FDFBF7]">
       {/* Top Navbar */}
-      <Navbar
-        isAdminRoute={isAdminRoute}
-        onNavigateHome={handleNavigateHome}
-        onExitAdmin={handleExitAdmin}
-        unreadCount={unreadCount}
-      />
+      {!isModeChoiceActive && (
+        <Navbar
+          isAdminRoute={isAdminRoute}
+          onNavigateHome={handleNavigateHome}
+          onExitAdmin={handleExitAdmin}
+          unreadCount={unreadCount}
+        />
+      )}
 
       {/* Toast confirmation for Demo Reset */}
       {toastMsg && (
@@ -293,7 +285,65 @@ export default function App() {
 
       {/* Main View Display */}
       <main>
-        {showStaffChoice && !isAdminRoute ? (
+        {isModeChoiceActive ? (
+          <div className="min-h-screen flex items-center justify-center px-4 sm:px-6 lg:px-8 bg-[#1C1917]">
+            <div className="w-full max-w-md p-8 rounded-3xl bg-[#2D2926] border border-[#E8E2D2]/10 shadow-2xl text-center space-y-8 animate-fade-in">
+              {/* Branding */}
+              <div className="space-y-4">
+                <div className="w-36 h-36 mx-auto flex items-center justify-center bg-transparent shrink-0 select-none relative">
+                  <div className="absolute inset-0 rounded-full bg-[#E37A08]/5 blur-xl scale-125 animate-pulse" />
+                  <img src={LOGO_BASE64} alt="Just Dosa Logo" className="w-full h-full object-contain drop-shadow-md animate-[pulse_3s_infinite]" referrerPolicy="no-referrer" />
+                </div>
+                <div>
+                  <span className="inline-block px-3 py-1 rounded-md bg-[#E37A08]/10 text-[#E37A08] border border-[#E37A08]/20 text-xs font-bold uppercase tracking-widest mb-3">
+                    Mill Park • Melbourne
+                  </span>
+                  <h1 className="font-serif text-3xl sm:text-4xl font-bold text-white tracking-tight">
+                    Just Dosa
+                  </h1>
+                  <p className="text-xs text-[#B8ACA0] uppercase tracking-widest font-semibold mt-1">
+                    Authentic South Indian
+                  </p>
+                </div>
+              </div>
+
+              {/* Message */}
+              <div className="text-sm text-[#B8ACA0] leading-relaxed max-w-xs mx-auto">
+                Welcome to Just Dosa Mill Park. Please select a mode to enter the terminal.
+              </div>
+
+              {/* Buttons */}
+              <div className="flex flex-col gap-3.5 pt-2">
+                <button
+                  onClick={() => {
+                    sessionStorage.setItem('just_dosa_mode_choice', 'customer');
+                    setModeChoice('customer');
+                  }}
+                  className="w-full py-4.5 px-6 rounded-xl bg-[#E37A08] hover:bg-[#c96906] text-white font-bold text-base shadow-lg shadow-[#E37A08]/15 transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
+                  </svg>
+                  <span>Customer view</span>
+                </button>
+                
+                <button
+                  onClick={() => {
+                    window.history.pushState({}, '', '/#/admin');
+                    setPathname('/');
+                    setHash('#/admin');
+                  }}
+                  className="w-full py-4.5 px-6 rounded-xl bg-transparent hover:bg-white/5 text-[#B8ACA0] hover:text-white font-bold text-base border border-[#E8E2D2]/10 transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                  <span>Staff / Admin</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : showStaffChoice && !isAdminRoute ? (
           <div className="min-h-[80vh] flex items-center justify-center px-4 sm:px-6 lg:px-8 bg-[#1C1917]">
             <div className="w-full max-w-md p-8 rounded-3xl bg-[#2D2926] border border-[#E8E2D2]/10 shadow-2xl text-center space-y-6 animate-fade-in">
               <div className="w-16 h-16 bg-[#E37A08]/10 rounded-full flex items-center justify-center mx-auto text-[#E37A08]">
@@ -327,6 +377,8 @@ export default function App() {
                 <button
                   onClick={() => {
                     localStorage.removeItem('just_dosa_admin_device_v2');
+                    sessionStorage.setItem('just_dosa_mode_choice', 'customer');
+                    setModeChoice('customer');
                     setShowStaffChoice(false);
                   }}
                   className="w-full py-4 px-5 rounded-xl bg-transparent hover:bg-white/5 text-[#B8ACA0] hover:text-[#FDFBF7] font-semibold text-sm border border-[#E8E2D2]/10 transition-all active:scale-[0.98] cursor-pointer"
