@@ -7,20 +7,38 @@ import { dataService } from './services/dataService';
 import { Booking, AdminRole } from './types';
 
 export default function App() {
+  const isCustomerOnly = (import.meta as any).env.VITE_APP_MODE === 'customer';
+
   const [pathname, setPathname] = useState(() => window.location.pathname);
   const [hash, setHash] = useState(() => {
+    if (isCustomerOnly) {
+      return '';
+    }
     const params = new URLSearchParams(window.location.search);
     const isModeAdmin = params.get('mode') === 'admin';
     const isAdminDevice = localStorage.getItem('just_dosa_admin_device_v2') === 'true';
-    if (isModeAdmin || isAdminDevice) {
-      if (isModeAdmin) {
-        localStorage.setItem('just_dosa_admin_device_v2', 'true');
-      }
+    const hasAdminHash = window.location.hash === '#/admin' || window.location.hash === '#admin' || window.location.hash.startsWith('#/admin/') || window.location.hash.startsWith('#admin/');
+
+    if (isModeAdmin || (isAdminDevice && hasAdminHash)) {
       return '#/admin';
     }
     return window.location.hash;
   });
+  const [showStaffChoice, setShowStaffChoice] = useState(() => {
+    if (isCustomerOnly) {
+      return false;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const isModeAdmin = params.get('mode') === 'admin';
+    const isAdminDevice = localStorage.getItem('just_dosa_admin_device_v2') === 'true';
+    const hasAdminHash = window.location.hash === '#/admin' || window.location.hash === '#admin' || window.location.hash.startsWith('#/admin/') || window.location.hash.startsWith('#admin/');
+
+    return isAdminDevice && !isModeAdmin && !hasAdminHash;
+  });
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() => {
+    if (isCustomerOnly) {
+      return false;
+    }
     const auth = sessionStorage.getItem('just_dosa_admin_auth') === 'true';
     const authTime = sessionStorage.getItem('just_dosa_admin_auth_time');
     if (auth && authTime) {
@@ -36,6 +54,9 @@ export default function App() {
     return false;
   });
   const [adminRole, setAdminRole] = useState<AdminRole | null>(() => {
+    if (isCustomerOnly) {
+      return null;
+    }
     const auth = sessionStorage.getItem('just_dosa_admin_auth') === 'true';
     const authTime = sessionStorage.getItem('just_dosa_admin_auth_time');
     if (auth && authTime) {
@@ -46,6 +67,11 @@ export default function App() {
     }
     return null;
   });
+  
+  // 5-tap gesture states for Navbar brand logo
+  const [logoClicks, setLogoClicks] = useState<number>(0);
+  const [lastClickTime, setLastClickTime] = useState<number>(0);
+
   const isDarkMode = true;
   const [unreadCount, setUnreadCount] = useState(0);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
@@ -116,19 +142,36 @@ export default function App() {
   }, [isAdminAuthenticated]);
 
   useEffect(() => {
+    if (isCustomerOnly) {
+      const hasLeftoverAdminHash = window.location.hash === '#/admin' || window.location.hash === '#admin' || window.location.hash.startsWith('#/admin/') || window.location.hash.startsWith('#admin/');
+      const isNotRootPath = window.location.pathname !== '/';
+      const hasSearchParams = window.location.search !== '';
+
+      if (hasLeftoverAdminHash || isNotRootPath || hasSearchParams) {
+        window.history.replaceState({}, '', '/');
+        if (pathname !== '/' || hash !== '') {
+          setPathname('/');
+          setHash('');
+        }
+      }
+      return;
+    }
+
     const params = new URLSearchParams(window.location.search);
     const isModeAdmin = params.get('mode') === 'admin';
     const isAdminDevice = localStorage.getItem('just_dosa_admin_device_v2') === 'true';
+    const hasAdminHash = window.location.hash === '#/admin' || window.location.hash === '#admin' || window.location.hash.startsWith('#/admin/') || window.location.hash.startsWith('#admin/');
 
     let nextPathname = window.location.pathname;
     let nextHash = window.location.hash;
     let urlChanged = false;
 
-    if (isModeAdmin || isAdminDevice) {
-      if (isModeAdmin) {
-        localStorage.setItem('just_dosa_admin_device_v2', 'true');
-      }
-      
+    // Check if we should show staff choice screen
+    if (isAdminDevice && !isModeAdmin && !hasAdminHash && !showStaffChoice) {
+      setShowStaffChoice(true);
+    }
+
+    if (isModeAdmin || (isAdminDevice && hasAdminHash)) {
       // Ensure pathname is '/' and hash is '#/admin' and search is empty
       if (window.location.pathname !== '/' || window.location.hash !== '#/admin' || window.location.search !== '') {
         window.history.replaceState({}, '', '/#/admin');
@@ -137,20 +180,30 @@ export default function App() {
         urlChanged = true;
       }
     } else {
-      // Normal customer mode
-      // Let's check for combined path like /customer#/admin or /admin
-      const hasLeftoverAdminHash = window.location.hash === '#/admin' || window.location.hash === '#admin';
-      const isNotRootPath = window.location.pathname !== '/';
-      const hasSearchParams = window.location.search !== '';
-      
-      if (isNotRootPath || hasSearchParams) {
-        // If we have a non-root path combined with an admin hash, clear the hash too!
-        const targetHash = hasLeftoverAdminHash ? '' : window.location.hash;
-        const cleanURL = '/' + targetHash;
-        window.history.replaceState({}, '', cleanURL);
-        nextPathname = '/';
-        nextHash = targetHash;
-        urlChanged = true;
+      // Normal customer mode or bare customer URL on admin device
+      if (isAdminDevice && !isModeAdmin && !hasAdminHash) {
+         // Bare URL: keep it bare and don't redirect to lock screen
+        if (window.location.pathname !== '/' || window.location.search !== '') {
+          window.history.replaceState({}, '', '/');
+          nextPathname = '/';
+          nextHash = '';
+          urlChanged = true;
+        }
+      } else {
+        // Normal customer mode
+        const hasLeftoverAdminHash = window.location.hash === '#/admin' || window.location.hash === '#admin';
+        const isNotRootPath = window.location.pathname !== '/';
+        const hasSearchParams = window.location.search !== '';
+        
+        if (isNotRootPath || hasSearchParams) {
+          // If we have a non-root path combined with an admin hash, clear the hash too!
+          const targetHash = hasLeftoverAdminHash ? '' : window.location.hash;
+          const cleanURL = '/' + targetHash;
+          window.history.replaceState({}, '', cleanURL);
+          nextPathname = '/';
+          nextHash = targetHash;
+          urlChanged = true;
+        }
       }
     }
 
@@ -158,9 +211,9 @@ export default function App() {
       setPathname(nextPathname);
       setHash(nextHash);
     }
-  }, [pathname, hash]);
+  }, [pathname, hash, showStaffChoice]);
 
-  const isAdminRoute = pathname === '/admin' || pathname.startsWith('/admin') || hash === '#/admin' || hash === '#admin' || hash.startsWith('#/admin/') || hash.startsWith('#admin/');
+  const isAdminRoute = !isCustomerOnly && (pathname === '/admin' || pathname.startsWith('/admin') || hash === '#/admin' || hash === '#admin' || hash.startsWith('#/admin/') || hash.startsWith('#admin/'));
   const isPinModalOpen = isAdminRoute && !isAdminAuthenticated;
 
   const handlePinSuccess = (role: AdminRole) => {
@@ -179,6 +232,24 @@ export default function App() {
   };
 
   const handleNavigateHome = () => {
+    if (!isCustomerOnly) {
+      const now = Date.now();
+      if (now - lastClickTime < 2000) {
+        const nextClicks = logoClicks + 1;
+        setLogoClicks(nextClicks);
+        if (nextClicks >= 5) {
+          setLogoClicks(0);
+          window.history.pushState({}, '', '/#/admin');
+          setPathname('/');
+          setHash('#/admin');
+          return;
+        }
+      } else {
+        setLogoClicks(1);
+      }
+      setLastClickTime(now);
+    }
+
     window.history.pushState({}, '', '/');
     setPathname('/');
     setHash('');
@@ -211,7 +282,6 @@ export default function App() {
         onNavigateHome={handleNavigateHome}
         onExitAdmin={handleExitAdmin}
         unreadCount={unreadCount}
-        onResetDemo={handleResetDemo}
       />
 
       {/* Toast confirmation for Demo Reset */}
@@ -223,9 +293,52 @@ export default function App() {
 
       {/* Main View Display */}
       <main>
-        {isAdminRoute ? (
+        {showStaffChoice && !isAdminRoute ? (
+          <div className="min-h-[80vh] flex items-center justify-center px-4 sm:px-6 lg:px-8 bg-[#1C1917]">
+            <div className="w-full max-w-md p-8 rounded-3xl bg-[#2D2926] border border-[#E8E2D2]/10 shadow-2xl text-center space-y-6 animate-fade-in">
+              <div className="w-16 h-16 bg-[#E37A08]/10 rounded-full flex items-center justify-center mx-auto text-[#E37A08]">
+                <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+              </div>
+              
+              <div className="space-y-2">
+                <h2 className="font-serif text-2xl font-bold text-[#FDFBF7]">
+                  Staff Terminal Setup
+                </h2>
+                <p className="text-sm text-[#B8ACA0] leading-relaxed">
+                  This device is set up as a staff terminal. How would you like to proceed?
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-3 pt-4">
+                <button
+                  onClick={() => {
+                    setShowStaffChoice(false);
+                    window.history.pushState({}, '', '/#/admin');
+                    setPathname('/');
+                    setHash('#/admin');
+                  }}
+                  className="w-full py-4 px-5 rounded-xl bg-[#E37A08] hover:bg-[#c96906] text-white font-bold text-sm shadow-lg shadow-[#E37A08]/10 transition-all active:scale-[0.98] cursor-pointer"
+                >
+                  Continue to staff login
+                </button>
+                
+                <button
+                  onClick={() => {
+                    localStorage.removeItem('just_dosa_admin_device_v2');
+                    setShowStaffChoice(false);
+                  }}
+                  className="w-full py-4 px-5 rounded-xl bg-transparent hover:bg-white/5 text-[#B8ACA0] hover:text-[#FDFBF7] font-semibold text-sm border border-[#E8E2D2]/10 transition-all active:scale-[0.98] cursor-pointer"
+                >
+                  Use as customer
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : isAdminRoute ? (
           isAdminAuthenticated && adminRole ? (
-            <AdminDashboard adminRole={adminRole} onResetDemo={handleResetDemo} />
+            <AdminDashboard adminRole={adminRole} />
           ) : (
             <div className="min-h-[70vh] flex items-center justify-center">
               <p className="text-sm text-[#8B4513] dark:text-[#D2B48C] font-medium animate-pulse">
@@ -239,11 +352,13 @@ export default function App() {
       </main>
 
       {/* Admin PIN Authentication Modal */}
-      <PINModal
-        isOpen={isPinModalOpen}
-        onSuccess={handlePinSuccess}
-        onClose={handlePinClose}
-      />
+      {!isCustomerOnly && (
+        <PINModal
+          isOpen={isPinModalOpen}
+          onSuccess={handlePinSuccess}
+          onClose={handlePinClose}
+        />
+      )}
     </div>
   );
 }

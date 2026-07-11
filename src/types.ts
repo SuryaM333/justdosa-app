@@ -1,6 +1,6 @@
 export type BookingType = 'walk-in' | 'remote';
 
-export type BookingStatus = 'waiting' | 'pending' | 'confirmed' | 'declined' | 'booked' | 'seated' | 'finished' | 'cancelled' | 'no-show' | 'alternative_proposed';
+export type BookingStatus = 'waiting' | 'pending' | 'confirmed' | 'declined' | 'booked' | 'seated' | 'finished' | 'cancelled' | 'no-show' | 'alternative_proposed' | 'expired';
 
 export type AdminRole = 'staff' | 'owner';
 
@@ -56,6 +56,7 @@ export interface Booking {
   allergies?: string;
   serverName?: string;
   handledBy?: string;
+  agreedConditions?: boolean;
 }
 
 export interface Table {

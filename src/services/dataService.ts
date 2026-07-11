@@ -286,8 +286,43 @@ function initFirestoreSync() {
       if (!docSnap.exists()) {
         await safeSetDoc(settingsDocRef, DEFAULT_SETTINGS);
       } else {
-        cachedSettings = docSnap.data();
+        const docData = docSnap.data() || {};
+        cachedSettings = docData;
         notifyListeners();
+
+        // Check if there are any keys in DEFAULT_SETTINGS that are missing from docData
+        const missingFields: Record<string, any> = {};
+        let needsMergeUpdate = false;
+        
+        for (const [key, val] of Object.entries(DEFAULT_SETTINGS)) {
+          if (!(key in docData)) {
+            missingFields[key] = val;
+            needsMergeUpdate = true;
+          } else if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
+            // Check sub-properties of nested objects (e.g. customerTexts, waitTimeAlertThresholds, openingHours)
+            const docSubData = docData[key] || {};
+            const missingSubFields: Record<string, any> = {};
+            let subNeedsUpdate = false;
+            for (const [subKey, subVal] of Object.entries(val)) {
+              if (!(subKey in docSubData)) {
+                missingSubFields[subKey] = subVal;
+                subNeedsUpdate = true;
+                needsMergeUpdate = true;
+              }
+            }
+            if (subNeedsUpdate) {
+              missingFields[key] = {
+                ...docSubData,
+                ...missingSubFields
+              };
+            }
+          }
+        }
+
+        if (needsMergeUpdate) {
+          console.log("Adding missing settings fields to Firestore: ", missingFields);
+          await safeSetDoc(settingsDocRef, missingFields, { merge: true });
+        }
       }
     } catch (err) {
       console.error("Error in settings sync: ", err);
@@ -330,49 +365,6 @@ function initFirestoreSync() {
         querySnap.forEach((doc) => {
           tables.push(doc.data() as Table);
         });
-
-        // Self-healing database check to ensure real Square URLs are used and Table 7 is active
-        let needsUpdate = false;
-        const updatedTables = tables.map((t) => {
-          let modified = false;
-          const initial = INITIAL_TABLES.find((it) => it.id === t.id);
-          if (initial) {
-            // Table 7 must be active
-            if (t.id === 7 && t.isInactive) {
-              t.isInactive = false;
-              modified = true;
-            }
-            // Table 7 capacity properties must match Table 5/6 (capacity 2, maxOverrideCapacity 3)
-            if (t.id === 7 && (t.capacity !== 2 || t.maxOverrideCapacity !== 3)) {
-              t.capacity = 2;
-              t.maxOverrideCapacity = 3;
-              modified = true;
-            }
-            // If placeholder URL is present, replace with real URL
-            if (t.orderingUrl && (t.orderingUrl.includes('example.com') || t.orderingUrl.includes('table-6') || t.orderingUrl.includes('table-7'))) {
-              t.orderingUrl = initial.orderingUrl;
-              modified = true;
-            }
-            // Tables 6 and 7 should have empty orderingUrls
-            if ((t.id === 6 || t.id === 7) && t.orderingUrl !== '') {
-              t.orderingUrl = '';
-              modified = true;
-            }
-          }
-          if (modified) {
-            needsUpdate = true;
-          }
-          return t;
-        });
-
-        if (needsUpdate) {
-          console.log("Auto-healing tables to real Square URLs and activating Table 7...");
-          const batch = writeBatch(db);
-          for (const t of updatedTables) {
-            batch.set(doc(db, 'tables', t.id.toString()), sanitizeData(t), { merge: true });
-          }
-          await safeCommitBatch(batch);
-        }
 
         tables.sort((a, b) => a.id - b.id);
         cachedTables = tables;
@@ -433,6 +425,29 @@ function initFirestoreSync() {
 // Kickstart synchronization immediately on module import
 if (typeof window !== 'undefined') {
   initFirestoreSync();
+
+  // Start a periodic background checker to automatically expire walk-in bookings that have waited > 1 hour
+  setInterval(async () => {
+    try {
+      const oneHourAgo = new Date(Date.now() - 3600000).toISOString();
+      const expiredWalkIns = cachedBookings.filter(b => 
+        b.type === 'walk-in' && 
+        b.status === 'waiting' && 
+        b.createdAt && 
+        b.createdAt < oneHourAgo
+      );
+
+      for (const booking of expiredWalkIns) {
+        console.log(`Automatically expiring walk-in booking ${booking.id} (${booking.firstName}) due to 1-hour session limit.`);
+        const bookingDocRef = doc(db, 'bookings', booking.id);
+        await safeSetDoc(bookingDocRef, {
+          status: 'expired'
+        }, { merge: true });
+      }
+    } catch (e) {
+      console.error("Error in background walk-in expiry checker:", e);
+    }
+  }, 15000); // Check every 15 seconds
 }
 
 // ----------------------------------------------------
@@ -883,10 +898,11 @@ export const dataService = {
     type: 'walk-in' | 'remote';
     bookingDate?: string;
     bookingTime?: string;
-    isKalyanaVirundhu?: boolean;
+      isKalyanaVirundhu?: boolean;
     kalyanaSlot?: string;
     notes?: string;
     allergies?: string;
+    agreedConditions?: boolean;
   }): Promise<Booking> {
     const formattedPhone = formatAusMobile(data.phone);
     const cleanedPhone = cleanPhoneNumber(data.phone);
@@ -970,6 +986,7 @@ export const dataService = {
             kalyanaSlot: data.kalyanaSlot,
             notes: data.notes || '',
             allergies: data.allergies || '',
+            agreedConditions: data.agreedConditions || null,
           };
 
           const bookingRef = doc(db, 'bookings', bookingId);
@@ -1039,6 +1056,7 @@ export const dataService = {
           kalyanaSlot: data.kalyanaSlot || null,
           notes: data.notes || '',
           allergies: data.allergies || '',
+          agreedConditions: data.agreedConditions || null,
         };
 
         if (newBooking.type === 'walk-in') {

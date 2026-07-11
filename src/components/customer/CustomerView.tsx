@@ -66,6 +66,8 @@ export const CustomerView: React.FC = () => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
+  const [agreeConditions, setAgreeConditions] = useState(false);
+  const [walkInConditionsAccepted, setWalkInConditionsAccepted] = useState(() => typeof window !== 'undefined' ? sessionStorage.getItem('just_dosa_walkin_conditions_accepted') === 'true' : false);
   const [adultsCount, setAdultsCount] = useState(2);
   const [childrenCount, setChildrenCount] = useState(0);
   const [childrenHighChairs, setChildrenHighChairs] = useState<boolean[]>([]);
@@ -88,12 +90,44 @@ export const CustomerView: React.FC = () => {
   const [notes, setNotes] = useState('');
   const [showNotesField, setShowNotesField] = useState(false);
 
+  // 5-tap gesture states
+  const [logoClicks, setLogoClicks] = useState(0);
+  const [lastClickTime, setLastClickTime] = useState(0);
+
+  const handleLogoClick = () => {
+    const isCustomerOnly = (import.meta as any).env.VITE_APP_MODE === 'customer';
+    if (isCustomerOnly) return;
+
+    const now = Date.now();
+    if (now - lastClickTime < 2000) {
+      const nextClicks = logoClicks + 1;
+      setLogoClicks(nextClicks);
+      if (nextClicks >= 5) {
+        setLogoClicks(0);
+        window.location.hash = '/admin';
+      }
+    } else {
+      setLogoClicks(1);
+    }
+    setLastClickTime(now);
+  };
+
   const getDayOfWeek = (dateStr: string) => {
     if (!dateStr) return -1;
     const parts = dateStr.split('-');
     if (parts.length !== 3) return -1;
     const date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
     return date.getDay();
+  };
+
+  const formatValidUntil = (createdAtStr: string) => {
+    try {
+      const date = new Date(createdAtStr);
+      date.setHours(date.getHours() + 1);
+      return date.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true });
+    } catch (e) {
+      return '';
+    }
   };
 
   const getGroupedHours = () => {
@@ -157,6 +191,28 @@ export const CustomerView: React.FC = () => {
     setChildrenCount(validCount);
     setChildrenHighChairs((prev) => Array.from({ length: validCount }, (_, i) => prev[i] ?? false));
   };
+
+  // Subscribe to settings and tables changes in the dataService to trigger re-renders
+  const [settingsTick, setSettingsTick] = useState(0);
+  useEffect(() => {
+    const unsubscribe = dataService.subscribe(() => {
+      setSettingsTick((t) => t + 1);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  // Sync kalyana slot selection when settings load or update
+  useEffect(() => {
+    const slots = dataService.getKalyanaSlots();
+    if (slots && slots.length > 0) {
+      const hasCurrent = slots.some(s => s.range === kalyanaSlot);
+      if (!hasCurrent) {
+        setKalyanaSlot(slots[0].range);
+      }
+    }
+  }, [settingsTick, kalyanaSlot]);
 
   // Subscribe to live data changes directly via Firestore onSnapshot
   useEffect(() => {
@@ -293,6 +349,7 @@ export const CustomerView: React.FC = () => {
         kalyanaSlot: isKalyana ? kalyanaSlot : undefined,
         allergies: allergies.trim() || undefined,
         notes: notes.trim() || undefined,
+        agreedConditions: activeTab === 'walk-in' ? true : undefined,
       });
 
       localStorage.setItem('just_dosa_active_customer_booking_id', newBk.id);
@@ -332,12 +389,17 @@ export const CustomerView: React.FC = () => {
 
   const handleResetSession = () => {
     localStorage.removeItem('just_dosa_active_customer_booking_id');
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem('just_dosa_walkin_conditions_accepted');
+    }
+    setWalkInConditionsAccepted(false);
     setActiveBookingId(null);
     setActiveBooking(null);
     setActiveTab('walk-in');
     setFirstName('');
     setLastName('');
     setPhone('');
+    setAgreeConditions(false);
     setAdultsCount(2);
     setChildrenCount(0);
     setChildrenHighChairs([]);
@@ -368,6 +430,7 @@ export const CustomerView: React.FC = () => {
   if (activeTab === 'status' && activeBooking) {
     const isReady = activeBooking.status === 'seated';
     const isFinished = activeBooking.status === 'finished';
+    const isExpired = activeBooking.status === 'expired';
     const allocatedTable = activeBooking.tableId
       ? dataService.getTables().find((t) => t.id.toString() === activeBooking.tableId?.toString() || t.name === activeBooking.tableId?.toString())
       : null;
@@ -386,7 +449,7 @@ export const CustomerView: React.FC = () => {
           }`}
         >
           {/* Top accent line */}
-          <div className={`absolute top-0 left-0 right-0 h-2 ${isFinished ? 'bg-[#E37A08]' : isReady ? 'bg-[#22C55E]' : 'bg-[#E37A08]'}`} />
+          <div className={`absolute top-0 left-0 right-0 h-2 ${isExpired ? 'bg-rose-500' : isFinished ? 'bg-[#E37A08]' : isReady ? 'bg-[#22C55E]' : 'bg-[#E37A08]'}`} />
 
           <AnimatePresence>
             {showStatusHighlight && (
@@ -402,7 +465,30 @@ export const CustomerView: React.FC = () => {
             )}
           </AnimatePresence>
 
-          {isFinished ? (
+          {isExpired ? (
+            <motion.div
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: 'spring', damping: 12 }}
+            >
+              <div className="w-20 h-20 bg-rose-500/10 dark:bg-rose-500/20 rounded-full flex items-center justify-center mx-auto mb-4 text-rose-500 border-4 border-rose-500/20 animate-pulse">
+                <XCircle className="w-10 h-10" />
+              </div>
+              <h2 className="font-serif text-2xl sm:text-3xl font-bold text-white mb-2 leading-tight">
+                Session Expired
+              </h2>
+              <p className="text-sm text-[#B8ACA0] mb-8 leading-relaxed">
+                Your session has expired — please rejoin the waitlist or see our staff.
+              </p>
+              
+              <button
+                onClick={handleResetSession}
+                className="w-full py-3.5 px-5 rounded-xl bg-[#E37A08] hover:bg-[#c96906] text-white font-bold text-sm shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 mb-2 cursor-pointer"
+              >
+                <span>Rejoin the Waitlist</span>
+              </button>
+            </motion.div>
+          ) : isFinished ? (
             <motion.div
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
@@ -483,6 +569,12 @@ export const CustomerView: React.FC = () => {
               <h2 className="font-serif text-xl sm:text-2xl font-bold text-white mb-1">
                 Waiting for Allocation
               </h2>
+              {activeBooking.type === 'walk-in' && (
+                <div className="mb-4 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#E37A08]/10 border border-[#E37A08]/20 text-xs font-semibold text-[#E37A08] mx-auto">
+                  <Clock className="w-3.5 h-3.5 animate-pulse" />
+                  <span>Valid until {formatValidUntil(activeBooking.createdAt)}</span>
+                </div>
+              )}
               <p className="text-xs text-[#B8ACA0] mb-6">
                 Hi {activeBooking.firstName}, you are on the live waitlist for {formatPartyBreakdown(activeBooking)}.
               </p>
@@ -541,7 +633,7 @@ export const CustomerView: React.FC = () => {
             </div>
           )}
 
-          {!isFinished && (
+          {!isFinished && !isExpired && (
             <div className="space-y-3">
               <button
                 onClick={handleBackToHome}
@@ -752,11 +844,11 @@ export const CustomerView: React.FC = () => {
               )}
 
               {/* WhatsApp Self-Link Saver card */}
-              <div className="bg-emerald-600/10 border border-emerald-500/30 rounded-2xl p-4 text-left mb-6 space-y-2">
-                <span className="text-xs font-bold text-emerald-400 block uppercase tracking-wider flex items-center gap-1">
+              <div className="bg-emerald-500/10 border-2 border-emerald-500/40 rounded-2xl p-5 text-left mb-6 space-y-3 shadow-lg shadow-emerald-500/5">
+                <span className="text-xs font-bold text-emerald-400 block uppercase tracking-wider flex items-center gap-1.5">
                   <span>💾</span> Keep Your Booking Link Safe
                 </span>
-                <p className="text-[11px] text-[#B8ACA0] leading-relaxed">
+                <p className="text-xs text-[#B8ACA0] leading-relaxed">
                   Save this link on WhatsApp so you can easily view, change, or track your booking status anytime!
                 </p>
                 <button
@@ -766,11 +858,14 @@ export const CustomerView: React.FC = () => {
                     const waUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
                     window.open(waUrl, '_blank');
                   }}
-                  className="w-full py-2.5 px-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer"
+                  className="w-full py-3.5 px-4 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors shadow-md shadow-emerald-500/20 cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
                 >
-                  <ExternalLink className="w-4 h-4" />
+                  <ExternalLink className="w-4.5 h-4.5" />
                   <span>Save my booking link</span>
                 </button>
+                <span className="text-[11px] text-emerald-400/80 font-medium block text-center mt-1">
+                  Save this so you can check your booking anytime.
+                </span>
               </div>
 
               {/* Action Buttons */}
@@ -948,7 +1043,10 @@ export const CustomerView: React.FC = () => {
 
           {/* Welcome Header */}
           <motion.div variants={itemVariants} className="text-center mb-8">
-            <div className="w-56 h-56 mx-auto mb-2 flex items-center justify-center bg-transparent shrink-0">
+            <div 
+              className="w-56 h-56 mx-auto mb-2 flex items-center justify-center bg-transparent shrink-0 cursor-pointer select-none"
+              onClick={handleLogoClick}
+            >
               <img src={LOGO_BASE64} alt="Just Dosa Logo" className="w-full h-full object-contain drop-shadow-md animate-[pulse_3s_infinite]" referrerPolicy="no-referrer" />
             </div>
             <span className="inline-block px-3 py-1 rounded-md bg-[#F5F2EA] dark:bg-[#26221E] text-[#8B4513] dark:text-[#D2B48C] border border-[#E8E2D2] dark:border-[#3D352E] text-xs font-bold uppercase tracking-widest mb-2">
@@ -1045,18 +1143,80 @@ export const CustomerView: React.FC = () => {
         {/* Form Container */}
         <motion.div variants={itemVariants}>
           <motion.div
-            key={activeTab}
+            key={activeTab === 'walk-in' && !walkInConditionsAccepted ? 'walk-in-gate' : activeTab}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.2 }}
             className="bg-white dark:bg-[#26221E] rounded-3xl p-6 sm:p-8 shadow-xl border border-[#E8E2D2] dark:border-[#3D352E]"
           >
-          <div className="flex items-center gap-2 pb-4 mb-6 border-b border-[#E8E2D2] dark:border-[#3D352E]">
-            <div className={`w-3 h-3 rounded-full ${activeTab === 'walk-in' ? 'bg-[#E37A08]' : 'bg-[#8B4513]'}`} />
-            <h2 className="font-serif font-bold text-lg text-[#2D2926] dark:text-white">
-              {activeTab === 'walk-in' ? 'Walk-In Waitlist Form' : 'Remote Reservation Form'}
-            </h2>
-          </div>
+            {activeTab === 'walk-in' && !walkInConditionsAccepted ? (
+              <div className="space-y-6">
+                <div className="flex items-center gap-3 pb-4 border-b border-[#E8E2D2] dark:border-[#3D352E]">
+                  <div className="w-10 h-10 rounded-xl bg-[#E37A08]/10 flex items-center justify-center text-[#E37A08]">
+                    <AlertCircle className="w-5 h-5 animate-pulse" />
+                  </div>
+                  <h2 className="font-serif font-bold text-lg sm:text-xl text-[#2D2926] dark:text-white">
+                    Before you book
+                  </h2>
+                </div>
+
+                <p className="text-sm text-[#6B5E4C] dark:text-[#B8ACA0] leading-relaxed">
+                  Your waitlist session is valid for 1 hour from booking. Please provide a WhatsApp-enabled mobile number so we can reach you about your table.
+                </p>
+
+                <div className="pt-2">
+                  <label className="flex items-start gap-3 p-4 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] cursor-pointer hover:border-[#E37A08]/40 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={agreeConditions}
+                      onChange={(e) => setAgreeConditions(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded text-[#E37A08] focus:ring-[#E37A08] border-[#E8E2D2] dark:border-[#3D352E]"
+                    />
+                    <div>
+                      <span className="text-xs font-semibold text-[#2D2926] dark:text-white flex items-center gap-1.5">
+                        I agree to the booking conditions. *
+                      </span>
+                      <span className="text-[11px] text-[#A1917B] dark:text-[#9C8D7C] block mt-0.5">
+                        Required. I acknowledge that this waitlist entry is valid for 1 hour.
+                      </span>
+                    </div>
+                  </label>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (agreeConditions) {
+                      setWalkInConditionsAccepted(true);
+                      if (typeof window !== 'undefined') {
+                        sessionStorage.setItem('just_dosa_walkin_conditions_accepted', 'true');
+                      }
+                    }
+                  }}
+                  disabled={!agreeConditions}
+                  className="w-full py-4 rounded-xl font-bold text-white text-base shadow-lg transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 bg-[#E37A08] hover:bg-[#C96905] shadow-[#E37A08]/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer animate-fade-in"
+                >
+                  <span>Continue</span>
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 pb-4 mb-6 border-b border-[#E8E2D2] dark:border-[#3D352E]">
+                  <div className={`w-3 h-3 rounded-full ${activeTab === 'walk-in' ? 'bg-[#E37A08]' : 'bg-[#8B4513]'}`} />
+                  <h2 className="font-serif font-bold text-lg text-[#2D2926] dark:text-white">
+                    {activeTab === 'walk-in' ? 'Walk-In Waitlist Form' : 'Remote Reservation Form'}
+                  </h2>
+                </div>
+
+          {activeTab === 'walk-in' && (
+            <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs flex items-start gap-3.5 leading-relaxed">
+              <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold block mb-1">Session Validity Notice</span>
+                Your booking session is valid for 1 hour. Please provide a WhatsApp-enabled mobile number so we can reach you.
+              </div>
+            </div>
+          )}
 
           {errorMsg && (
             <div className="mb-6 p-4 rounded-xl bg-[#EF4444]/10 border border-[#EF4444]/30 text-[#EF4444] text-xs flex items-center gap-2 animate-shake">
@@ -1463,7 +1623,9 @@ export const CustomerView: React.FC = () => {
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={getDayOfWeek(bookingDate) === 2 && activeTab === 'remote'}
+              disabled={
+                (getDayOfWeek(bookingDate) === 2 && activeTab === 'remote')
+              }
               className={`w-full py-4 rounded-xl font-bold text-white text-base shadow-lg transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
                 activeTab === 'walk-in'
                   ? 'bg-[#E37A08] hover:bg-[#C96905] shadow-[#E37A08]/20'
@@ -1473,7 +1635,9 @@ export const CustomerView: React.FC = () => {
               <span>{activeTab === 'walk-in' ? 'Join Live Waitlist' : 'Confirm Table Reservation'}</span>
             </button>
           </form>
-        </motion.div>
+          </>
+        )}
+      </motion.div>
       </motion.div>
     </motion.div>
   </div>

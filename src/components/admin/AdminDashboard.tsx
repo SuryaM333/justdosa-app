@@ -14,10 +14,9 @@ import { playNewBookingChime } from '../../utils/sound';
 
 interface AdminDashboardProps {
   adminRole: AdminRole;
-  onResetDemo: () => void;
 }
 
-export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole, onResetDemo }) => {
+export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>('waiting');
   const [tables, setTables] = useState<Table[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);

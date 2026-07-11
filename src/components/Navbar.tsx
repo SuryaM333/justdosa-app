@@ -1,5 +1,4 @@
 import React from 'react';
-import { RotateCcw } from 'lucide-react';
 import { LOGO_BASE64 } from './logoBase64';
 
 interface NavbarProps {
@@ -7,7 +6,6 @@ interface NavbarProps {
   onNavigateHome?: () => void;
   onExitAdmin?: () => void;
   unreadCount: number;
-  onResetDemo: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -15,7 +13,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   onNavigateHome,
   onExitAdmin,
   unreadCount,
-  onResetDemo,
 }) => {
   return (
     <header className="sticky top-0 z-50 border-b bg-[#1C1917]/90 border-[#3D352E] text-[#FDFBF7] backdrop-blur-md">
@@ -52,16 +49,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               title="Exit Admin to Customer View"
             >
               <span>Exit Admin</span>
-            </button>
-          )}
-
-          {isAdminRoute && (
-            <button
-              onClick={onResetDemo}
-              title="Clear and Reset Database"
-              className="p-2 rounded-xl text-[#B8ACA0] dark:text-[#B8ACA0] hover:text-[#D2B48C] hover:bg-[#26221E] transition-colors border border-transparent hover:border-[#3D352E]"
-            >
-              <RotateCcw className="w-4 h-4" />
             </button>
           )}
         </div>
