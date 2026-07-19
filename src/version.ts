@@ -1,1 +1,0 @@
-export const APP_VERSION = '1784427975961';

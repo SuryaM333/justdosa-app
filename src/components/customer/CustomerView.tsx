@@ -117,9 +117,13 @@ export const CustomerView: React.FC = () => {
 
   const getGroupedHours = () => {
     const hours = dataService.getOpeningHours();
-    const formatTimeStr = (hhmm: string) => {
-      if (!hhmm) return '';
-      const [h, m] = hhmm.split(':').map(Number);
+    const formatTimeStr = (hhmm: any) => {
+      if (!hhmm || typeof hhmm !== 'string') return '';
+      const parts = hhmm.split(':');
+      if (parts.length < 2) return hhmm;
+      const h = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10);
+      if (isNaN(h) || isNaN(m)) return hhmm;
       const ampm = h >= 12 ? 'PM' : 'AM';
       const displayH = h > 12 ? h - 12 : (h === 0 ? 12 : h);
       return `${displayH}:${m.toString().padStart(2, '0')} ${ampm}`;

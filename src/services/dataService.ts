@@ -372,7 +372,8 @@ function initFirestoreSync() {
             needsMergeUpdate = true;
           } else if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
             // Check sub-properties of nested objects (e.g. customerTexts, waitTimeAlertThresholds, openingHours)
-            const docSubData = docData[key] || {};
+            const rawSubData = docData[key];
+            const docSubData = (rawSubData && typeof rawSubData === 'object' && !Array.isArray(rawSubData)) ? rawSubData : {};
             const missingSubFields: Record<string, any> = {};
             let subNeedsUpdate = false;
             for (const [subKey, subVal] of Object.entries(val)) {
@@ -654,7 +655,9 @@ export const dataService = {
   },
 
   getOpeningHours(): Record<string, { isOpen: boolean; lunchOpen: boolean; lunchStart: string; lunchEnd: string; dinnerOpen: boolean; dinnerStart: string; dinnerEnd: string }> {
-    return cachedSettings?.openingHours || DEFAULT_SETTINGS.openingHours;
+    return (cachedSettings && typeof cachedSettings.openingHours === 'object' && cachedSettings.openingHours !== null)
+      ? cachedSettings.openingHours
+      : DEFAULT_SETTINGS.openingHours;
   },
 
   async setOpeningHours(openingHours: any) {
@@ -666,7 +669,7 @@ export const dataService = {
   },
 
   getLunchBuffer(): number {
-    return cachedSettings?.lunchBuffer !== undefined ? cachedSettings.lunchBuffer : 30;
+    return (cachedSettings && typeof cachedSettings.lunchBuffer === 'number') ? cachedSettings.lunchBuffer : 30;
   },
 
   async setLunchBuffer(buffer: number) {
@@ -678,7 +681,7 @@ export const dataService = {
   },
 
   getDinnerBuffer(): number {
-    return cachedSettings?.dinnerBuffer !== undefined ? cachedSettings.dinnerBuffer : 30;
+    return (cachedSettings && typeof cachedSettings.dinnerBuffer === 'number') ? cachedSettings.dinnerBuffer : 30;
   },
 
   async setDinnerBuffer(buffer: number) {
@@ -690,7 +693,7 @@ export const dataService = {
   },
 
   getSlotInterval(): number {
-    return cachedSettings?.slotInterval !== undefined ? cachedSettings.slotInterval : 15;
+    return (cachedSettings && typeof cachedSettings.slotInterval === 'number') ? cachedSettings.slotInterval : 15;
   },
 
   async setSlotInterval(interval: number) {
@@ -702,7 +705,7 @@ export const dataService = {
   },
 
   isKalyanaEnabled(): boolean {
-    return cachedSettings?.kalyanaEnabled !== undefined ? cachedSettings.kalyanaEnabled : true;
+    return (cachedSettings && typeof cachedSettings.kalyanaEnabled === 'boolean') ? cachedSettings.kalyanaEnabled : true;
   },
 
   async setKalyanaEnabled(enabled: boolean) {
@@ -714,7 +717,9 @@ export const dataService = {
   },
 
   getKalyanaSlots(): { id: string; range: string; capacity: number }[] {
-    return cachedSettings?.kalyanaSlots || DEFAULT_SETTINGS.kalyanaSlots;
+    return (cachedSettings && Array.isArray(cachedSettings.kalyanaSlots))
+      ? cachedSettings.kalyanaSlots
+      : DEFAULT_SETTINGS.kalyanaSlots;
   },
 
   async setKalyanaSlots(slots: any[]) {
@@ -726,7 +731,9 @@ export const dataService = {
   },
 
   getCustomerTexts(): { welcomeLine: string; waitingReassurance: string; tableReadyTemplate: string; thankYouMessage: string; noOrderingUrlNote: string } {
-    return cachedSettings?.customerTexts || DEFAULT_SETTINGS.customerTexts;
+    return (cachedSettings && typeof cachedSettings.customerTexts === 'object' && cachedSettings.customerTexts !== null)
+      ? { ...DEFAULT_SETTINGS.customerTexts, ...cachedSettings.customerTexts }
+      : DEFAULT_SETTINGS.customerTexts;
   },
 
   async setCustomerTexts(customerTexts: any) {
@@ -738,7 +745,9 @@ export const dataService = {
   },
 
   getWaitTimeAlertThresholds(): { low: number; medium: number; high: number } {
-    return cachedSettings?.waitTimeAlertThresholds || DEFAULT_SETTINGS.waitTimeAlertThresholds;
+    return (cachedSettings && typeof cachedSettings.waitTimeAlertThresholds === 'object' && cachedSettings.waitTimeAlertThresholds !== null)
+      ? { ...DEFAULT_SETTINGS.waitTimeAlertThresholds, ...cachedSettings.waitTimeAlertThresholds }
+      : DEFAULT_SETTINGS.waitTimeAlertThresholds;
   },
 
   async setWaitTimeAlertThresholds(waitTimeAlertThresholds: { low: number; medium: number; high: number }) {
