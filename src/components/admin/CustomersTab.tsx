@@ -3,6 +3,7 @@ import { Search, ArrowUpDown, MessageSquare, ExternalLink, Sparkles, AlertTriang
 import { Customer, Booking } from '../../types';
 import { getWhatsAppUrl } from '../../utils/phone';
 import { dataService } from '../../services/dataService';
+import { parseToDate, safeFormatDate } from '../../utils/dateUtils';
 
 interface CustomersTabProps {
   customers: Record<string, Customer>;
@@ -51,7 +52,9 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
     if (sortBy === 'visits') {
       comparison = b.totalVisits - a.totalVisits;
     } else if (sortBy === 'lastVisit') {
-      comparison = new Date(b.lastVisitDate).getTime() - new Date(a.lastVisitDate).getTime();
+      const timeA = parseToDate(a.lastVisitDate)?.getTime() || 0;
+      const timeB = parseToDate(b.lastVisitDate)?.getTime() || 0;
+      comparison = timeB - timeA;
     } else if (sortBy === 'name') {
       comparison = `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`);
     }
@@ -68,12 +71,7 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
   };
 
   const formatDate = (isoStr: string) => {
-    try {
-      const d = new Date(isoStr);
-      return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
-    } catch {
-      return isoStr;
-    }
+    return safeFormatDate(isoStr);
   };
 
   const handleDeleteConfirm = () => {
@@ -263,7 +261,11 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
                           <div className="flex flex-col gap-1 max-h-24 overflow-y-auto pr-1">
                             {bookings
                               .filter(b => b.phone === cust.phone)
-                              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                              .sort((a, b) => {
+                                const timeA = parseToDate(a.createdAt)?.getTime() || 0;
+                                const timeB = parseToDate(b.createdAt)?.getTime() || 0;
+                                return timeB - timeA;
+                              })
                               .map(b => (
                                 <div key={b.id} className="flex items-center justify-between text-[11px] bg-[#F5F2EA]/40 dark:bg-[#1C1917]/40 px-2 py-1 rounded border border-[#E8E2D2]/50 dark:border-[#3D352E]/30">
                                   <div className="flex items-center gap-1.5">

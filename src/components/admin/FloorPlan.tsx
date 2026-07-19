@@ -4,6 +4,7 @@ import { Users, CheckCircle2, AlertTriangle, Ban, Clock, X, Check, Plus, UserChe
 import { Table, Booking } from '../../types';
 import { dataService } from '../../services/dataService';
 import { getRequiredTableSeats, formatPartyBreakdownShort } from '../../utils/bookingUtils';
+import { parseToDate, safeGetElapsedMs } from '../../utils/dateUtils';
 
 interface FloorPlanProps {
   tables: Table[];
@@ -65,8 +66,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   };
 
   const getSeatedDuration = (seatedAt?: string): string => {
-    if (!seatedAt) return '0m';
-    const diffMins = Math.max(1, Math.round((Date.now() - new Date(seatedAt).getTime()) / 60000));
+    const elapsedMs = safeGetElapsedMs(seatedAt);
+    if (elapsedMs === 0 && !parseToDate(seatedAt)) return '0m';
+    const diffMins = Math.max(1, Math.round(elapsedMs / 60000));
     return `${diffMins}m`;
   };
 

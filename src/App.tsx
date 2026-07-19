@@ -7,7 +7,22 @@ import { Booking, AdminRole } from './types';
 import { LOGO_BASE64 } from './components/logoBase64';
 import { APP_VERSION } from './version';
 
-const AdminDashboard = lazy(() => import('./components/admin/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
+function safeLazy<T extends React.ComponentType<any>>(importFunc: () => Promise<{ default: T }>): React.LazyExoticComponent<T> {
+  return lazy(() => 
+    importFunc().catch((error) => {
+      console.error("Chunk load failed, attempting recovery reload...", error);
+      const hasReloaded = sessionStorage.getItem('just_dosa_chunk_reload_attempted');
+      if (!hasReloaded) {
+        sessionStorage.setItem('just_dosa_chunk_reload_attempted', 'true');
+        window.location.reload();
+        return new Promise<{ default: T }>(() => {});
+      }
+      throw error;
+    })
+  );
+}
+
+const AdminDashboard = safeLazy(() => import('./components/admin/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
 
 export default function App() {
   const isCustomerOnly = (import.meta as any).env.VITE_APP_MODE === 'customer';
@@ -31,6 +46,8 @@ export default function App() {
     }
     return window.location.hash;
   });
+
+  const isAdminRoute = !isCustomerOnly && (pathname === '/admin' || pathname.startsWith('/admin') || hash === '#/admin' || hash === '#admin' || hash.startsWith('#/admin/') || hash.startsWith('#admin/'));
   const [showStaffChoice, setShowStaffChoice] = useState(() => {
     if (isCustomerOnly) {
       return false;
@@ -88,6 +105,11 @@ export default function App() {
   const [updateAvailable, setUpdateAvailable] = useState(false);
 
   useEffect(() => {
+    if (isCustomerOnly || !isAdminRoute) {
+      setUpdateAvailable(false);
+      return;
+    }
+
     const checkVersion = async () => {
       try {
         const res = await fetch(`/version.json?t=${Date.now()}`, {
@@ -97,11 +119,7 @@ export default function App() {
           const data = await res.json();
           if (data && data.version && data.version !== APP_VERSION) {
             console.log(`Version mismatch! Live version: ${data.version}, running version: ${APP_VERSION}`);
-            if ((window as any).__IS_MID_BOOKING__) {
-              setUpdateAvailable(true);
-            } else {
-              window.location.reload();
-            }
+            setUpdateAvailable(true);
           }
         }
       } catch (err) {
@@ -127,7 +145,7 @@ export default function App() {
       clearInterval(interval);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, []);
+  }, [isAdminRoute, isCustomerOnly]);
 
   useEffect(() => {
     // Set dark mode class on html/body
@@ -266,7 +284,6 @@ export default function App() {
     }
   }, [pathname, hash, showStaffChoice]);
 
-  const isAdminRoute = !isCustomerOnly && (pathname === '/admin' || pathname.startsWith('/admin') || hash === '#/admin' || hash === '#admin' || hash.startsWith('#/admin/') || hash.startsWith('#admin/'));
   const isPinModalOpen = isAdminRoute && !isAdminAuthenticated;
 
   const handlePinSuccess = (role: AdminRole) => {
@@ -478,7 +495,7 @@ export default function App() {
       )}
 
       {/* Update Available Banner */}
-      {updateAvailable && (
+      {updateAvailable && isAdminRoute && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm px-4">
           <div className="flex items-center justify-between gap-3 bg-[#2D2926] border border-[#E37A08]/30 px-4 py-3 rounded-2xl shadow-2xl shadow-black/80 animate-bounce">
             <div className="flex items-center gap-2">

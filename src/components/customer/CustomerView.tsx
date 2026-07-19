@@ -6,6 +6,7 @@ import { dataService, db } from '../../services/dataService';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { formatAusMobile, isValidAusMobile } from '../../utils/phone';
 import { formatPartyBreakdown } from '../../utils/bookingUtils';
+import { safeFormatValidUntil } from '../../utils/dateUtils';
 import { SignatureDishShowcase } from './SignatureDishShowcase';
 import { LOGO_BASE64 } from '../logoBase64';
 import { TimeWheelPicker, getAvailableTimeSlotsShared } from '../TimeWheelPicker';
@@ -111,13 +112,7 @@ export const CustomerView: React.FC = () => {
   };
 
   const formatValidUntil = (createdAtStr: string) => {
-    try {
-      const date = new Date(createdAtStr);
-      date.setHours(date.getHours() + 1);
-      return date.toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit', hour12: true });
-    } catch (e) {
-      return '';
-    }
+    return safeFormatValidUntil(createdAtStr);
   };
 
   const getGroupedHours = () => {

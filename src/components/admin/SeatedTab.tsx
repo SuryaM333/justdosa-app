@@ -4,6 +4,7 @@ import { Booking, Table } from '../../types';
 import { dataService } from '../../services/dataService';
 import { getWhatsAppUrl } from '../../utils/phone';
 import { formatPartyBreakdown } from '../../utils/bookingUtils';
+import { parseToDate, safeGetElapsedMs, safeFormatSeatedDuration } from '../../utils/dateUtils';
 
 interface SeatedTabProps {
   bookings: Booking[];
@@ -16,15 +17,13 @@ export const SeatedTab: React.FC<SeatedTabProps> = ({ bookings, tables, onRefres
   const seatedList = bookings
     .filter((b) => b.status === 'seated')
     .sort((a, b) => {
-      const timeA = a.seatedAt ? new Date(a.seatedAt).getTime() : 0;
-      const timeB = b.seatedAt ? new Date(b.seatedAt).getTime() : 0;
+      const timeA = parseToDate(a.seatedAt)?.getTime() || 0;
+      const timeB = parseToDate(b.seatedAt)?.getTime() || 0;
       return timeB - timeA;
     });
 
   const getSeatedDuration = (seatedAt?: string): string => {
-    if (!seatedAt) return '0m';
-    const diffMins = Math.max(1, Math.round((Date.now() - new Date(seatedAt).getTime()) / 60000));
-    return `${diffMins} mins`;
+    return safeFormatSeatedDuration(seatedAt);
   };
 
   const handleFinish = (tableId?: number, name?: string) => {

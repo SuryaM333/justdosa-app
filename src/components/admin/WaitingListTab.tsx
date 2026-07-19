@@ -5,6 +5,7 @@ import { dataService } from '../../services/dataService';
 import { getWhatsAppUrl } from '../../utils/phone';
 import { formatPartyBreakdown, getRequiredTableSeats } from '../../utils/bookingUtils';
 import { playWaitAlertSound } from '../../utils/sound';
+import { parseToDate, safeGetElapsedMs, safeFormatWaited } from '../../utils/dateUtils';
 
 interface WaitingListTabProps {
   bookings: Booking[];
@@ -38,7 +39,11 @@ export const WaitingListTab: React.FC<WaitingListTabProps> = ({
   const waitingList = React.useMemo(() => {
     return bookings
       .filter((b) => b.status === 'waiting')
-      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      .sort((a, b) => {
+        const timeA = parseToDate(a.createdAt)?.getTime() || 0;
+        const timeB = parseToDate(b.createdAt)?.getTime() || 0;
+        return timeA - timeB;
+      });
   }, [bookings]);
 
   // Track played sound alerts to prevent repeated audio triggers
@@ -47,7 +52,7 @@ export const WaitingListTab: React.FC<WaitingListTabProps> = ({
   useEffect(() => {
     const thresholds = dataService.getWaitTimeAlertThresholds();
     waitingList.forEach((booking) => {
-      const diffMins = Math.max(0, Math.round((Date.now() - new Date(booking.createdAt).getTime()) / 60000));
+      const diffMins = Math.max(0, Math.round(safeGetElapsedMs(booking.createdAt) / 60000));
       const alreadyPlayed = playedAlertsRef.current[booking.id];
 
       if (diffMins >= thresholds.high) {
@@ -65,11 +70,7 @@ export const WaitingListTab: React.FC<WaitingListTabProps> = ({
   }, [waitingList]);
 
   const getWaitedTime = (isoString: string): string => {
-    const elapsedMs = Date.now() - new Date(isoString).getTime();
-    const elapsedSecs = Math.max(0, Math.floor(elapsedMs / 1000));
-    const mins = Math.floor(elapsedSecs / 60);
-    const secs = elapsedSecs % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    return safeFormatWaited(isoString);
   };
 
   const getCustomerBadge = (phone: string) => {
@@ -172,7 +173,7 @@ export const WaitingListTab: React.FC<WaitingListTabProps> = ({
             const isSelected = selectedWaitingBooking?.id === booking.id;
 
             // Escalating wait time alert calculations
-            const elapsedMs = Date.now() - new Date(booking.createdAt).getTime();
+            const elapsedMs = safeGetElapsedMs(booking.createdAt);
             const diffMins = Math.max(0, elapsedMs / 60000);
             
             let alertStyle = '';
