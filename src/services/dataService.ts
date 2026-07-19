@@ -92,20 +92,43 @@ export function sanitizeData<T>(obj: T): T {
   if (obj === null || obj === undefined) {
     return obj;
   }
+  if (typeof obj !== 'object') {
+    return obj;
+  }
+  if (obj instanceof Date) {
+    return obj;
+  }
+  // Safe check for Firestore FieldValue
+  if (
+    obj.constructor &&
+    (obj.constructor.name === 'FieldValue' || 
+     obj.constructor.name === 'FieldValueImpl' ||
+     '_methodName' in obj)
+  ) {
+    return obj;
+  }
+  // Safe check for Firestore Timestamp
+  if (typeof (obj as any).toDate === 'function') {
+    return obj;
+  }
   if (Array.isArray(obj)) {
     return obj.map(item => sanitizeData(item)) as any;
   }
-  if (typeof obj === 'object') {
-    const res: any = {};
-    for (const key of Object.keys(obj)) {
-      const val = (obj as any)[key];
-      if (val !== undefined) {
-        res[key] = sanitizeData(val);
-      }
-    }
-    return res;
+
+  // Prevent converting custom classes with prototype chains to raw objects
+  const proto = Object.getPrototypeOf(obj);
+  if (proto !== null && proto !== Object.prototype) {
+    return obj;
   }
-  return obj;
+
+  const res: any = {};
+  for (const key of Object.keys(obj)) {
+    const val = (obj as any)[key];
+    if (val !== undefined) {
+      res[key] = sanitizeData(val);
+    }
+  }
+  return res;
 }
 
 export function getSessionHandledBy(): string | undefined {

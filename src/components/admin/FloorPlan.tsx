@@ -6,6 +6,12 @@ import { dataService } from '../../services/dataService';
 import { getRequiredTableSeats, formatPartyBreakdownShort } from '../../utils/bookingUtils';
 import { parseToDate, safeGetElapsedMs } from '../../utils/dateUtils';
 
+const getCleanMergedWith = (val: any): number | string | null => {
+  if (!val) return null;
+  if (typeof val === 'object') return null;
+  return val;
+};
+
 interface FloorPlanProps {
   tables: Table[];
   bookings: Booking[];
@@ -300,9 +306,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             <div className={`text-xs font-bold px-2 py-0.5 rounded-full shadow-sm flex items-center gap-1 ${badgeBg}`}>
               <span>{table.name}</span>
             </div>
-            {table.mergedWith && (
+            {getCleanMergedWith(table.mergedWith) && (
               <span className="text-[9px] font-black tracking-wider uppercase bg-blue-500 text-white px-1.5 py-0.5 rounded border border-blue-600 shadow-xs mt-0.5 whitespace-nowrap">
-                🔗 + Table {table.mergedWith}
+                🔗 + Table {getCleanMergedWith(table.mergedWith)}
               </span>
             )}
             {table.assignedServer && (
@@ -351,8 +357,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               <div className="flex items-center gap-1 text-[10px] text-[#6B5E4C] dark:text-[#B8ACA0] mt-0.5 font-medium">
                 <Users className="w-3 h-3" />
                 <span>
-                  Cap: {table.mergedWith ? table.capacity + (tables.find(t => t.id === Number(table.mergedWith))?.capacity || 0) : table.capacity}
-                  {!table.mergedWith && table.maxOverrideCapacity > table.capacity ? ' (+1)' : ''}
+                  Cap: {getCleanMergedWith(table.mergedWith) ? table.capacity + (tables.find(t => t.id === Number(getCleanMergedWith(table.mergedWith)))?.capacity || 0) : table.capacity}
+                  {!getCleanMergedWith(table.mergedWith) && table.maxOverrideCapacity > table.capacity ? ' (+1)' : ''}
                 </span>
               </div>
             </div>
@@ -724,11 +730,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     Quick Seat Walk-In
                   </span>
                   <h3 className="font-serif font-bold text-lg text-[#2D2926] dark:text-white mt-1">
-                    {quickSeatModal.mergedWith 
-                      ? `Seat party at ${quickSeatModal.name} + Table ${quickSeatModal.mergedWith}`
+                    {getCleanMergedWith(quickSeatModal.mergedWith) 
+                      ? `Seat party at ${quickSeatModal.name} + Table ${getCleanMergedWith(quickSeatModal.mergedWith)}`
                       : `Seat party at ${quickSeatModal.name}`}
                   </h3>
-                  {quickSeatModal.mergedWith && (
+                  {getCleanMergedWith(quickSeatModal.mergedWith) && (
                     <button
                       type="button"
                       onClick={async () => {
@@ -770,7 +776,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        const otherMerged = quickSeatModal.mergedWith ? tables.find(t => t.id === Number(quickSeatModal.mergedWith)) : null;
+                        const otherMerged = getCleanMergedWith(quickSeatModal.mergedWith) ? tables.find(t => t.id === Number(getCleanMergedWith(quickSeatModal.mergedWith))) : null;
                         const maxCap = otherMerged ? quickSeatModal.capacity + otherMerged.capacity : quickSeatModal.maxOverrideCapacity;
                         setQuickSeatPartySize((prev) => Math.min(maxCap, prev + 1));
                       }}
