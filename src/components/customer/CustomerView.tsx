@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Utensils, Clock, Calendar, Users, Baby, Phone, MessageSquare, CheckCircle2, Sparkles, ArrowLeft, AlertCircle, XCircle, QrCode, ExternalLink } from 'lucide-react';
 import { Booking } from '../../types';
-import { dataService, db } from '../../services/dataService';
+import { dataService, db, sanitizeFirestoreIncoming } from '../../services/dataService';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { formatAusMobile, isValidAusMobile } from '../../utils/phone';
 import { formatPartyBreakdown } from '../../utils/bookingUtils';
@@ -210,7 +210,7 @@ export const CustomerView: React.FC = () => {
     const unsubscribeSnapshot = onSnapshot(bookingDocRef, (docSnap) => {
       try {
         if (docSnap.exists()) {
-          const found = docSnap.data() as Booking;
+          const found = sanitizeFirestoreIncoming(docSnap.data() as Booking);
           setActiveBooking(found);
           if (!hasRoutedOnLoad) {
             if (found.type === 'walk-in' && (found.status === 'waiting' || found.status === 'seated' || found.status === 'finished')) {

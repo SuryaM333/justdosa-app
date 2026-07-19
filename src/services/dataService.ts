@@ -131,6 +131,47 @@ export function sanitizeData<T>(obj: T): T {
   return res;
 }
 
+export function sanitizeFirestoreIncoming<T>(obj: T): T {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+  if (typeof obj !== 'object') {
+    return obj;
+  }
+  if (obj instanceof Date) {
+    return obj;
+  }
+  // If it's a Firestore Timestamp with .toDate()
+  if (typeof (obj as any).toDate === 'function') {
+    return obj;
+  }
+  // Check if it's a Firestore FieldValue or similar custom object representing a delete or pending write
+  if (
+    obj.constructor &&
+    (obj.constructor.name === 'FieldValue' || 
+     obj.constructor.name === 'FieldValueImpl' ||
+     '_methodName' in obj)
+  ) {
+    return undefined as any; // Convert FieldValue to undefined on the client so React never sees it!
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeFirestoreIncoming(item)).filter(item => item !== undefined) as any;
+  }
+  const proto = Object.getPrototypeOf(obj);
+  if (proto !== null && proto !== Object.prototype) {
+    return obj;
+  }
+  const res: any = {};
+  for (const key of Object.keys(obj)) {
+    const val = (obj as any)[key];
+    const sanitizedVal = sanitizeFirestoreIncoming(val);
+    if (sanitizedVal !== undefined) {
+      res[key] = sanitizedVal;
+    }
+  }
+  return res;
+}
+
 export function getSessionHandledBy(): string | undefined {
   if (typeof window !== 'undefined' && typeof sessionStorage !== 'undefined') {
     const role = sessionStorage.getItem('just_dosa_admin_role');
@@ -317,7 +358,7 @@ function initFirestoreSync() {
       if (!docSnap.exists()) {
         await safeSetDoc(settingsDocRef, DEFAULT_SETTINGS);
       } else {
-        const docData = docSnap.data() || {};
+        const docData = sanitizeFirestoreIncoming(docSnap.data() || {});
         cachedSettings = docData;
         notifyListeners();
 
@@ -394,7 +435,7 @@ function initFirestoreSync() {
       } else {
         const tables: Table[] = [];
         querySnap.forEach((doc) => {
-          tables.push(doc.data() as Table);
+          tables.push(sanitizeFirestoreIncoming(doc.data() as Table));
         });
 
         tables.sort((a, b) => a.id - b.id);
@@ -418,7 +459,7 @@ function initFirestoreSync() {
       } else {
         const bookings: Booking[] = [];
         querySnap.forEach((doc) => {
-          bookings.push(doc.data() as Booking);
+          bookings.push(sanitizeFirestoreIncoming(doc.data() as Booking));
         });
         cachedBookings = bookings;
         notifyListeners();
@@ -440,7 +481,7 @@ function initFirestoreSync() {
       } else {
         const customers: Record<string, Customer> = {};
         querySnap.forEach((doc) => {
-          customers[doc.id] = doc.data() as Customer;
+          customers[doc.id] = sanitizeFirestoreIncoming(doc.data() as Customer);
         });
         cachedCustomers = customers;
         notifyListeners();
