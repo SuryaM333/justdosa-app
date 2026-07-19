@@ -14,7 +14,8 @@ import {
   runTransaction,
   writeBatch,
   deleteDoc,
-  deleteField
+  deleteField,
+  setLogLevel
 } from 'firebase/firestore';
 import { hashPin } from '../utils/crypto';
 
@@ -27,6 +28,7 @@ const app = initializeApp(firebaseConfig);
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true
 }, firebaseConfig.firestoreDatabaseId);
+setLogLevel('silent');
 
 // ----------------------------------------------------
 // FIRESTORE ERROR HANDLING (Spec compliant)
@@ -71,6 +73,12 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     operationType,
     path
   };
+
+  if (operationType === OperationType.GET || operationType === OperationType.LIST) {
+    console.warn('Firestore Sync Info (Offline/Unavailable): ', JSON.stringify(errInfo));
+    return;
+  }
+
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('justDosaWriteError', { 
@@ -325,7 +333,7 @@ function initFirestoreSync() {
         }
       }
     } catch (err) {
-      console.error("Error in settings sync: ", err);
+      console.warn("Error in settings sync: ", err);
     }
   }, (error) => {
     handleFirestoreError(error, OperationType.GET, 'settings/global');
@@ -346,7 +354,7 @@ function initFirestoreSync() {
         notifyListeners();
       }
     } catch (err) {
-      console.error("Error in secure pins sync: ", err);
+      console.warn("Error in secure pins sync: ", err);
     }
   }, (error) => {
     handleFirestoreError(error, OperationType.GET, 'settings_secure/pins');
@@ -371,7 +379,7 @@ function initFirestoreSync() {
         notifyListeners();
       }
     } catch (err) {
-      console.error("Error in tables sync: ", err);
+      console.warn("Error in tables sync: ", err);
     }
   }, (error) => {
     handleFirestoreError(error, OperationType.LIST, 'tables');
@@ -393,7 +401,7 @@ function initFirestoreSync() {
         notifyListeners();
       }
     } catch (err) {
-      console.error("Error in bookings sync: ", err);
+      console.warn("Error in bookings sync: ", err);
     }
   }, (error) => {
     handleFirestoreError(error, OperationType.LIST, 'bookings');
@@ -415,7 +423,7 @@ function initFirestoreSync() {
         notifyListeners();
       }
     } catch (err) {
-      console.error("Error in customers sync: ", err);
+      console.warn("Error in customers sync: ", err);
     }
   }, (error) => {
     handleFirestoreError(error, OperationType.LIST, 'customers');

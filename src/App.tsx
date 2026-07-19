@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { Navbar } from './components/Navbar';
 import { CustomerView } from './components/customer/CustomerView';
-import { AdminDashboard } from './components/admin/AdminDashboard';
 import { PINModal } from './components/admin/PINModal';
 import { dataService } from './services/dataService';
 import { Booking, AdminRole } from './types';
 import { LOGO_BASE64 } from './components/logoBase64';
+import { APP_VERSION } from './version';
+
+const AdminDashboard = lazy(() => import('./components/admin/AdminDashboard').then(m => ({ default: m.AdminDashboard })));
 
 export default function App() {
   const isCustomerOnly = (import.meta as any).env.VITE_APP_MODE === 'customer';
@@ -20,7 +22,11 @@ export default function App() {
     const isAdminDevice = localStorage.getItem('just_dosa_admin_device_v2') === 'true';
     const hasAdminHash = window.location.hash === '#/admin' || window.location.hash === '#admin' || window.location.hash.startsWith('#/admin/') || window.location.hash.startsWith('#admin/');
 
-    if (isModeAdmin || (isAdminDevice && hasAdminHash)) {
+    const auth = sessionStorage.getItem('just_dosa_admin_auth') === 'true';
+    const authTime = sessionStorage.getItem('just_dosa_admin_auth_time');
+    const hasActiveAdminSession = auth && authTime && (Date.now() - parseInt(authTime, 10) < 12 * 60 * 60 * 1000);
+
+    if (isModeAdmin || (isAdminDevice && hasAdminHash) || hasActiveAdminSession) {
       return '#/admin';
     }
     return window.location.hash;
@@ -79,6 +85,49 @@ export default function App() {
   const isDarkMode = true;
   const [unreadCount, setUnreadCount] = useState(0);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+
+  useEffect(() => {
+    const checkVersion = async () => {
+      try {
+        const res = await fetch(`/version.json?t=${Date.now()}`, {
+          headers: { 'Cache-Control': 'no-cache, no-store' },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.version && data.version !== APP_VERSION) {
+            console.log(`Version mismatch! Live version: ${data.version}, running version: ${APP_VERSION}`);
+            if ((window as any).__IS_MID_BOOKING__) {
+              setUpdateAvailable(true);
+            } else {
+              window.location.reload();
+            }
+          }
+        }
+      } catch (err) {
+        console.log('Failed to fetch app version (offline or booting)', err);
+      }
+    };
+
+    // Check on mount
+    checkVersion();
+
+    // Check periodically every 30 seconds
+    const interval = setInterval(checkVersion, 30000);
+
+    // Check when returning to tab
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkVersion();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
   useEffect(() => {
     // Set dark mode class on html/body
@@ -255,6 +304,14 @@ export default function App() {
     setHash('#/admin');
   };
 
+  const handleGoToModeChoice = () => {
+    sessionStorage.removeItem('just_dosa_mode_choice');
+    setModeChoice(null);
+    window.history.pushState({}, '', '/');
+    setPathname('/');
+    setHash('');
+  };
+
   const handleResetDemo = () => {
     dataService.resetToSeedData();
     localStorage.removeItem('just_dosa_active_customer_booking_id');
@@ -262,7 +319,7 @@ export default function App() {
     setTimeout(() => setToastMsg(null), 3000);
   };
 
-  const isModeChoiceActive = !isCustomerOnly && !isAdminRoute && !isAdminAuthenticated && !showStaffChoice && modeChoice !== 'customer';
+  const isModeChoiceActive = !isCustomerOnly && !isAdminRoute && !showStaffChoice && modeChoice !== 'customer';
 
   return (
     <div className="min-h-screen font-sans antialiased bg-[#1C1917] text-[#FDFBF7]">
@@ -273,6 +330,7 @@ export default function App() {
           onNavigateHome={handleNavigateHome}
           onExitAdmin={handleExitAdmin}
           unreadCount={unreadCount}
+          onGoToModeChoice={!isCustomerOnly ? handleGoToModeChoice : undefined}
         />
       )}
 
@@ -390,7 +448,14 @@ export default function App() {
           </div>
         ) : isAdminRoute ? (
           isAdminAuthenticated && adminRole ? (
-            <AdminDashboard adminRole={adminRole} />
+            <Suspense fallback={
+              <div className="min-h-[70vh] flex flex-col items-center justify-center space-y-4">
+                <div className="w-12 h-12 border-4 border-[#E37A08] border-t-transparent rounded-full animate-spin" />
+                <p className="text-sm text-[#D2B48C] font-medium">Loading Admin Portal...</p>
+              </div>
+            }>
+              <AdminDashboard adminRole={adminRole} />
+            </Suspense>
           ) : (
             <div className="min-h-[70vh] flex items-center justify-center">
               <p className="text-sm text-[#8B4513] dark:text-[#D2B48C] font-medium animate-pulse">
@@ -410,6 +475,32 @@ export default function App() {
           onSuccess={handlePinSuccess}
           onClose={handlePinClose}
         />
+      )}
+
+      {/* Update Available Banner */}
+      {updateAvailable && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm px-4">
+          <div className="flex items-center justify-between gap-3 bg-[#2D2926] border border-[#E37A08]/30 px-4 py-3 rounded-2xl shadow-2xl shadow-black/80 animate-bounce">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#E37A08] opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#E37A08]"></span>
+              </span>
+              <span className="text-xs font-semibold text-[#FDFBF7]">
+                Update available — tap to refresh
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                sessionStorage.removeItem('just_dosa_chunk_reload_attempted');
+                window.location.reload();
+              }}
+              className="px-3 py-1.5 rounded-lg bg-[#E37A08] hover:bg-[#c96906] text-white font-bold text-[11px] tracking-wide uppercase transition-all shadow-md active:scale-95 cursor-pointer"
+            >
+              Update
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

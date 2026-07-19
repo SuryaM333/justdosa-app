@@ -90,6 +90,18 @@ export const CustomerView: React.FC = () => {
   const [notes, setNotes] = useState('');
   const [showNotesField, setShowNotesField] = useState(false);
 
+  // Keep window.__IS_MID_BOOKING__ up-to-date
+  useEffect(() => {
+    (window as any).__IS_MID_BOOKING__ = (
+      firstName.trim().length > 0 ||
+      lastName.trim().length > 0 ||
+      phone.trim().length > 0
+    );
+    return () => {
+      (window as any).__IS_MID_BOOKING__ = false;
+    };
+  }, [firstName, lastName, phone]);
+
   const getDayOfWeek = (dateStr: string) => {
     if (!dateStr) return -1;
     const parts = dateStr.split('-');
@@ -1210,7 +1222,7 @@ export const CustomerView: React.FC = () => {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Priya"
+                  placeholder="e.g. Chandra Bharath"
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
                   className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
@@ -1223,7 +1235,7 @@ export const CustomerView: React.FC = () => {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Nair"
+                  placeholder="e.g. Suryababu"
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
                   className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
