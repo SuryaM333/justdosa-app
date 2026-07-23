@@ -10,6 +10,7 @@ import { safeFormatValidUntil } from '../../utils/dateUtils';
 import { SignatureDishShowcase } from './SignatureDishShowcase';
 import { LOGO_BASE64 } from '../logoBase64';
 import { TimeWheelPicker, getAvailableTimeSlotsShared } from '../TimeWheelPicker';
+import { QuickNotesSelector } from '../QuickNotesSelector';
 
 export const CustomerView: React.FC = () => {
   const [showIntro, setShowIntro] = useState(() => {
@@ -1562,31 +1563,37 @@ export const CustomerView: React.FC = () => {
                     </button>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
-                        Allergies & Preferences
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. No gluten, window table"
-                        value={allergies}
-                        onChange={(e) => setAllergies(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
-                      />
-                    </div>
+                  <div className="space-y-3">
+                    <QuickNotesSelector
+                      currentNotes={notes}
+                      onNotesChange={(updated) => setNotes(updated)}
+                    />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
+                          Allergies & Preferences
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. No gluten, window table"
+                          value={allergies}
+                          onChange={(e) => setAllergies(e.target.value)}
+                          className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
+                        />
+                      </div>
 
-                    <div>
-                      <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
-                        General Notes
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="e.g. Celebrating Anniversary"
-                        value={notes}
-                        onChange={(e) => setNotes(e.target.value)}
-                        className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
-                      />
+                      <div>
+                        <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
+                          General Notes
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Celebrating Anniversary"
+                          value={notes}
+                          onChange={(e) => setNotes(e.target.value)}
+                          className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
+                        />
+                      </div>
                     </div>
                   </div>
                 )}

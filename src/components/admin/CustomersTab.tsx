@@ -13,9 +13,18 @@ interface CustomersTabProps {
 }
 
 export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings, adminRole, onRefresh }) => {
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchInput, setSearchInput] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [sortBy, setSortBy] = useState<'visits' | 'lastVisit' | 'name'>('visits');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+
+  // Debounce search input for instant responsiveness without keystroke lag
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchInput);
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   // Modal / action states
   const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
@@ -41,7 +50,7 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
   const isOwner = adminRole === 'owner';
 
   const filtered = customerList.filter((c: Customer) => {
-    const s = searchTerm.toLowerCase();
+    const s = debouncedSearch.toLowerCase();
     const fullName = `${c.firstName} ${c.lastName}`.toLowerCase();
     const cleanPhone = c.phone.replace(/\D/g, '');
     return fullName.includes(s) || cleanPhone.includes(s) || c.phone.includes(s);
@@ -157,8 +166,8 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
           <input
             type="text"
             placeholder="Search by name or phone..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] text-[#2D2926] dark:text-white transition-all"
           />
         </div>
@@ -228,7 +237,7 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
           </div>
         ) : sorted.length === 0 ? (
           <div className="p-12 text-center text-[#6B5E4C] text-sm">
-            No customer records found matching "{searchTerm}".
+            No customer records found matching "{searchInput}".
           </div>
         ) : (
           <div className="divide-y divide-[#E8E2D2] dark:divide-[#3D352E]/60">

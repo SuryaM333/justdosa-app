@@ -1,4 +1,5 @@
 import { Booking, Customer, DailyStats, Table, LandmarkPosition } from '../types';
+import { smsService } from './smsService';
 import { cleanPhoneNumber, formatAusMobile } from '../utils/phone';
 import { playNewBookingChime } from '../utils/sound';
 import { getRequiredTableSeats } from '../utils/bookingUtils';
@@ -15,7 +16,8 @@ import {
   writeBatch,
   deleteDoc,
   deleteField,
-  setLogLevel
+  setLogLevel,
+  enableIndexedDbPersistence
 } from 'firebase/firestore';
 import { hashPin } from '../utils/crypto';
 
@@ -29,6 +31,10 @@ export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true
 }, firebaseConfig.firestoreDatabaseId);
 setLogLevel('silent');
+
+if (typeof window !== 'undefined') {
+  enableIndexedDbPersistence(db).catch(() => {});
+}
 
 // ----------------------------------------------------
 // FIRESTORE ERROR HANDLING (Spec compliant)
@@ -448,8 +454,9 @@ function initFirestoreSync() {
           if (data) {
             // Guarantee ID type safety as number
             data.id = typeof data.id === 'string' ? parseInt(data.id, 10) : Number(data.id || docSnap.id);
-            if (isNaN(data.id)) {
-              data.id = parseInt(docSnap.id, 10) || 0;
+            if (isNaN(data.id) || data.id <= 0) return; // Skip phantom / invalid table docs
+            if (!data.name || data.name.trim() === '') {
+              data.name = `Table ${data.id}`;
             }
             if (data.mergedWith !== undefined && data.mergedWith !== null) {
               data.mergedWith = Number(data.mergedWith);
@@ -543,6 +550,37 @@ if (typeof window !== 'undefined') {
       console.error("Error in background walk-in expiry checker:", e);
     }
   }, 15000); // Check every 15 seconds
+
+  // Start a periodic background checker to automatically send 2-hour SMS reminders
+  setInterval(async () => {
+    try {
+      const now = new Date();
+      const todayStr = now.toISOString().split('T')[0];
+
+      const upcomingForReminder = cachedBookings.filter(b => {
+        if (b.status !== 'confirmed') return false;
+        if (b.reminderSent) return false;
+        if (b.bookingDate !== todayStr) return false;
+        if (!b.bookingTime) return false;
+
+        const [h, m] = b.bookingTime.split(':').map(Number);
+        const bDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m);
+        const diffMs = bDate.getTime() - now.getTime();
+        const diffMinutes = diffMs / (1000 * 60);
+
+        return diffMinutes > 0 && diffMinutes <= 120;
+      });
+
+      for (const booking of upcomingForReminder) {
+        console.log(`Sending automated 2-hour SMS reminder to ${booking.firstName} (${booking.phone})`);
+        await smsService.sendTwoHourReminderSMS(booking);
+        const bookingDocRef = doc(db, 'bookings', booking.id);
+        await safeSetDoc(bookingDocRef, { reminderSent: true }, { merge: true });
+      }
+    } catch (e) {
+      console.error("Error in background SMS reminder checker:", e);
+    }
+  }, 30000); // Check every 30 seconds
 }
 
 // ----------------------------------------------------
@@ -882,13 +920,16 @@ export const dataService = {
     if (cachedTables.length === 0) {
       return INITIAL_TABLES;
     }
-    return cachedTables;
+    return cachedTables.filter(t => t && typeof t.id === 'number' && t.id > 0 && t.name && t.name.trim() !== '');
   },
 
   async saveTables(tables: Table[]) {
     try {
+      const validTables = tables.filter(t => t && typeof t.id === 'number' && t.id > 0 && t.name && t.name.trim() !== '');
+      cachedTables = validTables;
+      notifyListeners();
       const batch = writeBatch(db);
-      tables.forEach((t) => {
+      validTables.forEach((t) => {
         batch.set(doc(db, 'tables', t.id.toString()), t);
       });
       await batch.commit();
@@ -1131,6 +1172,9 @@ export const dataService = {
         });
 
         playNewBookingChime();
+        if (newBooking) {
+          smsService.sendConfirmationSMS(newBooking).catch(err => console.warn('SMS send failed:', err));
+        }
         return newBooking!;
       } catch (error: any) {
         if (error.message === 'SLOT_FULL') {
@@ -1202,6 +1246,9 @@ export const dataService = {
         }
 
         playNewBookingChime();
+        if (newBooking) {
+          smsService.sendConfirmationSMS(newBooking).catch(err => console.warn('SMS send failed:', err));
+        }
 
         return newBooking;
       } catch (error) {
@@ -1448,6 +1495,28 @@ export const dataService = {
   },
 
   async allocateTable(bookingId: string, tableId: number, handledBy?: string): Promise<{ success: boolean; error?: string }> {
+    const prevTables = JSON.parse(JSON.stringify(cachedTables));
+    const prevBookings = JSON.parse(JSON.stringify(cachedBookings));
+
+    // Optimistic local update
+    const optTable = cachedTables.find((t) => t.id === tableId);
+    const optBooking = cachedBookings.find((b) => b.id === bookingId);
+    if (optTable && optBooking && !optTable.isOccupied && !optTable.isInactive) {
+      optTable.isOccupied = true;
+      optTable.currentBookingId = bookingId;
+      if (optTable.mergedWith) {
+        const optOther = cachedTables.find((t) => t.id === optTable.mergedWith);
+        if (optOther) {
+          optOther.isOccupied = true;
+          optOther.currentBookingId = bookingId;
+        }
+      }
+      optBooking.status = 'seated';
+      optBooking.tableId = tableId;
+      optBooking.seatedAt = new Date().toISOString();
+      notifyListeners();
+    }
+
     try {
       const result = await safeRunTransaction(db, async (transaction) => {
         const tableDocRef = doc(db, 'tables', tableId.toString());
@@ -1521,10 +1590,17 @@ export const dataService = {
       if (result.success) {
         await this.updateAllWaitingEstimates();
         await this.syncSlotOccupancyForBookingId(bookingId);
+      } else {
+        cachedTables = prevTables;
+        cachedBookings = prevBookings;
+        notifyListeners();
       }
 
       return result;
     } catch (error) {
+      cachedTables = prevTables;
+      cachedBookings = prevBookings;
+      notifyListeners();
       console.error("Allocation transaction error:", error);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('justDosaWriteError', { 
@@ -1536,6 +1612,32 @@ export const dataService = {
   },
 
   async finishSeatedParty(tableId: number, handledBy?: string): Promise<void> {
+    const prevTables = JSON.parse(JSON.stringify(cachedTables));
+    const prevBookings = JSON.parse(JSON.stringify(cachedBookings));
+
+    // Optimistic local update
+    const optTable = cachedTables.find((t) => t.id === tableId);
+    if (optTable) {
+      const bId = optTable.currentBookingId;
+      optTable.isOccupied = false;
+      optTable.currentBookingId = undefined;
+      if (optTable.mergedWith) {
+        const optOther = cachedTables.find((t) => t.id === optTable.mergedWith);
+        if (optOther) {
+          optOther.isOccupied = false;
+          optOther.currentBookingId = undefined;
+        }
+      }
+      if (bId) {
+        const optBooking = cachedBookings.find((b) => b.id === bId);
+        if (optBooking) {
+          optBooking.status = 'finished';
+          optBooking.finishedAt = new Date().toISOString();
+        }
+      }
+      notifyListeners();
+    }
+
     try {
       const tableDocRef = doc(db, 'tables', tableId.toString());
       const tableSnap = await getDoc(tableDocRef);
@@ -1693,6 +1795,11 @@ export const dataService = {
   },
 
   async markBookingArrived(bookingId: string) {
+    const optBooking = cachedBookings.find(b => b.id === bookingId);
+    if (optBooking) {
+      optBooking.status = 'waiting';
+      notifyListeners();
+    }
     try {
       await safeSetDoc(doc(db, 'bookings', bookingId), {
         status: 'waiting',
@@ -1706,6 +1813,14 @@ export const dataService = {
   },
 
   async confirmBooking(bookingId: string, handledBy?: string) {
+    const optBooking = cachedBookings.find(b => b.id === bookingId);
+    if (optBooking) {
+      optBooking.status = 'confirmed';
+      optBooking.isNewAlert = false;
+      const handledByVal = handledBy || getSessionHandledBy();
+      if (handledByVal) optBooking.handledBy = handledByVal;
+      notifyListeners();
+    }
     try {
       const bookingUpdate: any = {
         status: 'confirmed',
@@ -1723,6 +1838,12 @@ export const dataService = {
   },
 
   async declineBooking(bookingId: string) {
+    const optBooking = cachedBookings.find(b => b.id === bookingId);
+    if (optBooking) {
+      optBooking.status = 'declined';
+      optBooking.isNewAlert = false;
+      notifyListeners();
+    }
     try {
       await safeSetDoc(doc(db, 'bookings', bookingId), {
         status: 'declined',
@@ -1809,6 +1930,13 @@ export const dataService = {
   },
 
   async markBookingNoShow(bookingId: string, handledBy?: string) {
+    const optBooking = cachedBookings.find(b => b.id === bookingId);
+    if (optBooking) {
+      optBooking.status = 'no-show';
+      const handledByVal = handledBy || getSessionHandledBy();
+      if (handledByVal) optBooking.handledBy = handledByVal;
+      notifyListeners();
+    }
     try {
       const docRef = doc(db, 'bookings', bookingId);
       const snap = await getDoc(docRef);

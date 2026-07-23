@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, CheckCircle2, AlertTriangle, Ban, Clock, X, Check, Plus, UserCheck, DoorOpen, Bath, UtensilsCrossed, Store, Baby, GitMerge } from 'lucide-react';
+import { Users, CheckCircle2, AlertTriangle, Ban, Clock, X, Check, Plus, UserCheck, DoorOpen, Bath, UtensilsCrossed, Store, Baby, GitMerge, GripVertical, Move, Edit2, Save } from 'lucide-react';
 import { Table, Booking, LandmarkPosition } from '../../types';
 import { dataService } from '../../services/dataService';
 import { getRequiredTableSeats, formatPartyBreakdownShort } from '../../utils/bookingUtils';
@@ -37,6 +37,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [quickSeatServer, setQuickSeatServer] = useState('');
   const [mergeMode, setMergeMode] = useState(false);
   const [mergeFirstTableId, setMergeFirstTableId] = useState<number | null>(null);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [draggedItem, setDraggedItem] = useState<{ kind: 'table' | 'landmark'; id: number | string } | null>(null);
+  const [dragOverCol, setDragOverCol] = useState<'top' | 'left' | 'middle' | 'right' | null>(null);
+  const [layoutToast, setLayoutToast] = useState<string | null>(null);
 
   const getTableDefaultPosition = (id: number) => {
     switch (id) {
@@ -120,6 +124,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const bestFitTable = getBestFitTable();
 
   const handleTableClick = async (table: Table) => {
+    if (isEditMode) return;
     setErrorToast(null);
 
     if (mergeMode) {
@@ -284,10 +289,22 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     return (
       <motion.div
         key={table.id}
-        whileHover={!table.isInactive ? { scale: 1.03 } : {}}
-        whileTap={!table.isInactive ? { scale: 0.97 } : {}}
+        draggable={isEditMode}
+        onDragStart={(e) => {
+          if (!isEditMode) return;
+          e.dataTransfer.setData('text/plain', JSON.stringify({ kind: 'table', id: table.id }));
+          setDraggedItem({ kind: 'table', id: table.id });
+        }}
+        onDragEnd={() => {
+          setDraggedItem(null);
+          setDragOverCol(null);
+        }}
+        whileHover={!table.isInactive && !isEditMode ? { scale: 1.03 } : {}}
+        whileTap={!table.isInactive && !isEditMode ? { scale: 0.97 } : {}}
         onClick={() => handleTableClick(table)}
-        className={`relative cursor-pointer transition-all flex items-center justify-center select-none ${
+        className={`relative transition-all flex items-center justify-center select-none ${
+          isEditMode ? 'cursor-grab active:cursor-grabbing ring-2 ring-[#E37A08] shadow-lg' : 'cursor-pointer'
+        } ${
           isDiamond 
             ? 'w-24 h-24 sm:w-28 sm:h-28 my-4 mx-auto rotate-45 rounded-2xl border-2 shadow-md' 
             : table.id === 4 
@@ -295,6 +312,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             : 'w-28 sm:w-36 h-40 rounded-2xl border-2 shadow-md mx-auto'
         } ${bgStyle}`}
       >
+        {isEditMode && (
+          <div className={`absolute top-1 left-1 bg-[#E37A08] text-white p-1 rounded-md shadow-md z-30 ${isDiamond ? '-rotate-45' : ''}`}>
+            <GripVertical className="w-3.5 h-3.5" />
+          </div>
+        )}
         {isBestFit && (
           <div className={`absolute -top-3 left-1/2 -translate-x-1/2 bg-[#E37A08] text-white text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider shadow-md whitespace-nowrap z-20 flex items-center gap-1 ${isDiamond ? '-rotate-45' : ''}`}>
             <span>★ Best Fit</span>
@@ -408,11 +430,31 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           </p>
         </div>
 
-        {/* Merge and Legend Controls */}
-        <div className="flex flex-wrap items-center gap-4">
+        {/* Merge, Edit Floor Plan and Legend Controls */}
+        <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
             onClick={() => {
+              setIsEditMode(!isEditMode);
+              if (mergeMode) {
+                setMergeMode(false);
+                setMergeFirstTableId(null);
+              }
+            }}
+            className={`py-2 px-3.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm border ${
+              isEditMode
+                ? 'bg-[#E37A08] hover:bg-[#c96906] text-white border-transparent ring-2 ring-[#E37A08]/50 shadow-md'
+                : 'bg-[#F5F2EA] dark:bg-[#1C1917] hover:bg-[#E8E2D2] dark:hover:bg-[#26221E] text-[#8B4513] dark:text-[#D2B48C] border-[#E8E2D2] dark:border-[#3D352E]'
+            }`}
+          >
+            <Edit2 className="w-3.5 h-3.5" />
+            <span>{isEditMode ? 'Done Editing' : '✏️ Edit Floor Plan'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (isEditMode) setIsEditMode(false);
               if (mergeMode) {
                 setMergeFirstTableId(null);
               }
@@ -443,6 +485,54 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Edit Mode Guidance Banner */}
+      <AnimatePresence>
+        {isEditMode && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="mb-4 overflow-hidden"
+          >
+            <div className="p-3 bg-[#E37A08]/15 border-2 border-[#E37A08] rounded-2xl text-xs text-[#8B4513] dark:text-[#D2B48C] font-bold flex items-center justify-between shadow-sm">
+              <div className="flex items-center gap-2">
+                <GripVertical className="w-4 h-4 text-[#E37A08] shrink-0" />
+                <span>
+                  ✨ Drag & Drop Edit Mode Active — Drag tables or landmarks directly into any section (Top, Left, Middle, Right) to reposition them on the floor plan.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsEditMode(false)}
+                className="px-2.5 py-1 bg-[#E37A08] text-white rounded-lg text-[10px] font-bold hover:bg-[#c96906] shrink-0 cursor-pointer"
+              >
+                Done Editing
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Layout Saved Toast */}
+      <AnimatePresence>
+        {layoutToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="mb-4 p-3 rounded-xl bg-emerald-500/15 border border-emerald-500 text-emerald-800 dark:text-emerald-300 text-xs font-bold flex items-center justify-between shadow-sm"
+          >
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+              <span>{layoutToast}</span>
+            </div>
+            <button onClick={() => setLayoutToast(null)} className="p-1 hover:bg-emerald-200/50 rounded-lg">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Merge Mode Guidance Banner */}
       <AnimatePresence>
@@ -537,6 +627,52 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
       {/* Visual Grid with Landmarks */}
       {(() => {
+        const handleDropOnColumn = async (col: 'top' | 'left' | 'middle' | 'right') => {
+          setDragOverCol(null);
+          if (!draggedItem) return;
+
+          if (draggedItem.kind === 'table') {
+            const tId = Number(draggedItem.id);
+            const currentTables = dataService.getTables();
+            const updated = currentTables.map(t => {
+              if (t.id === tId) {
+                const defPos = getTableDefaultPosition(t.id);
+                return {
+                  ...t,
+                  position: {
+                    column: col,
+                    order: (allItems.filter(i => i.column === col).length || 0) + 1,
+                    isDiamond: t.position?.isDiamond ?? defPos.isDiamond
+                  }
+                };
+              }
+              return t;
+            });
+            await dataService.saveTables(updated);
+          } else {
+            const lmId = String(draggedItem.id);
+            const currentLandmarks = dataService.getLandmarks();
+            const updated = currentLandmarks.map(lm => {
+              if (lm.id === lmId) {
+                return {
+                  ...lm,
+                  position: {
+                    column: col,
+                    order: (allItems.filter(i => i.column === col).length || 0) + 1
+                  }
+                };
+              }
+              return lm;
+            });
+            await dataService.setLandmarks(updated);
+          }
+
+          setLayoutToast('Floor plan layout saved!');
+          setTimeout(() => setLayoutToast(null), 2500);
+          onTableUpdated();
+          setDraggedItem(null);
+        };
+
         const renderLandmarkNode = (lm: LandmarkPosition) => {
           let icon = <DoorOpen className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C] mb-1" />;
           let subtitle = 'Main Entrance';
@@ -552,7 +688,27 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           }
 
           return (
-            <div key={`lm-${lm.id}`} className="w-28 sm:w-36 h-20 sm:h-24 my-2 rounded-2xl bg-[#E8E2D2]/40 dark:bg-[#1C1917]/50 border-2 border-dashed border-[#A1917B]/60 dark:border-[#6B5E4C]/60 flex flex-col items-center justify-center p-2 text-center text-[#6B5E4C] dark:text-[#B8ACA0] shadow-inner select-none mx-auto">
+            <div
+              key={`lm-${lm.id}`}
+              draggable={isEditMode}
+              onDragStart={(e) => {
+                if (!isEditMode) return;
+                e.dataTransfer.setData('text/plain', JSON.stringify({ kind: 'landmark', id: lm.id }));
+                setDraggedItem({ kind: 'landmark', id: lm.id });
+              }}
+              onDragEnd={() => {
+                setDraggedItem(null);
+                setDragOverCol(null);
+              }}
+              className={`w-28 sm:w-36 h-20 sm:h-24 my-2 rounded-2xl bg-[#E8E2D2]/40 dark:bg-[#1C1917]/50 border-2 border-dashed border-[#A1917B]/60 dark:border-[#6B5E4C]/60 flex flex-col items-center justify-center p-2 text-center text-[#6B5E4C] dark:text-[#B8ACA0] shadow-inner select-none mx-auto relative ${
+                isEditMode ? 'cursor-grab active:cursor-grabbing ring-2 ring-[#8B4513] shadow-md' : ''
+              }`}
+            >
+              {isEditMode && (
+                <div className="absolute top-1 left-1 bg-[#8B4513] text-white p-1 rounded-md shadow-md z-30">
+                  <GripVertical className="w-3.5 h-3.5" />
+                </div>
+              )}
               {icon}
               <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider">{lm.name}</span>
               <span className="text-[9px] font-medium opacity-75">{subtitle}</span>
@@ -596,46 +752,124 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         const middleItems = allItems.filter(i => i.column === 'middle').sort((a, b) => a.order - b.order);
         const rightItems = allItems.filter(i => i.column === 'right').sort((a, b) => a.order - b.order);
 
+        const getColumnStyle = (col: 'top' | 'left' | 'middle' | 'right') => {
+          if (!isEditMode) return '';
+          const isOver = dragOverCol === col;
+          return `p-3 rounded-2xl transition-all border-2 ${
+            isOver
+              ? 'border-dashed border-[#E37A08] bg-[#E37A08]/15 ring-4 ring-[#E37A08]/30 scale-[1.01]'
+              : 'border-dashed border-[#E8E2D2] dark:border-[#3D352E] bg-white/40 dark:bg-[#26221E]/30'
+          }`;
+        };
+
         return (
           <div className="py-4 bg-[#FFFDF7]/60 dark:bg-[#1C1917]/40 rounded-2xl border border-[#E8E2D2]/60 dark:border-[#3D352E]/60 p-4 sm:p-8">
-            {/* Top Row */}
-            {topItems.length > 0 && (
-              <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-8 mb-6">
-                {topItems.map(item => (
-                  <div key={item.isTable ? `t-${item.tableId}` : `lm-${item.landmark?.id}`}>
-                    {item.isTable && item.tableId ? renderTableNode(item.tableId) : item.landmark ? renderLandmarkNode(item.landmark) : null}
+            {/* Top Row Drop Zone */}
+            <div
+              onDragOver={(e) => { e.preventDefault(); if (isEditMode) setDragOverCol('top'); }}
+              onDragLeave={() => { if (isEditMode) setDragOverCol(null); }}
+              onDrop={(e) => { e.preventDefault(); if (isEditMode) handleDropOnColumn('top'); }}
+              className={`mb-6 ${getColumnStyle('top')}`}
+            >
+              {isEditMode && (
+                <div className="text-[10px] font-bold text-[#E37A08] dark:text-[#D2B48C] uppercase tracking-wider text-center mb-2 flex items-center justify-center gap-1">
+                  <Move className="w-3 h-3" />
+                  <span>Top Section (Drop Zone)</span>
+                </div>
+              )}
+              <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-8 min-h-[4rem]">
+                {topItems.length === 0 && isEditMode ? (
+                  <div className="text-xs text-[#6B5E4C]/60 dark:text-[#B8ACA0]/60 italic p-3 text-center">
+                    (Top Section Empty — Drop items here)
                   </div>
-                ))}
+                ) : (
+                  topItems.map(item => (
+                    <div key={item.isTable ? `t-${item.tableId}` : `lm-${item.landmark?.id}`}>
+                      {item.isTable && item.tableId ? renderTableNode(item.tableId) : item.landmark ? renderLandmarkNode(item.landmark) : null}
+                    </div>
+                  ))
+                )}
               </div>
-            )}
+            </div>
 
             {/* 3 Columns Layout */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-8 items-start justify-items-center">
-              {/* Left Column */}
-              <div className="flex flex-col gap-4 sm:gap-6 w-full items-center">
-                {leftItems.map(item => (
-                  <div key={item.isTable ? `t-${item.tableId}` : `lm-${item.landmark?.id}`}>
-                    {item.isTable && item.tableId ? renderTableNode(item.tableId) : item.landmark ? renderLandmarkNode(item.landmark) : null}
+              {/* Left Column Drop Zone */}
+              <div
+                onDragOver={(e) => { e.preventDefault(); if (isEditMode) setDragOverCol('left'); }}
+                onDragLeave={() => { if (isEditMode) setDragOverCol(null); }}
+                onDrop={(e) => { e.preventDefault(); if (isEditMode) handleDropOnColumn('left'); }}
+                className={`flex flex-col gap-4 sm:gap-6 w-full items-center min-h-[12rem] ${getColumnStyle('left')}`}
+              >
+                {isEditMode && (
+                  <div className="text-[10px] font-bold text-[#E37A08] dark:text-[#D2B48C] uppercase tracking-wider text-center flex items-center justify-center gap-1">
+                    <Move className="w-3 h-3" />
+                    <span>Left Column (Drop Zone)</span>
                   </div>
-                ))}
+                )}
+                {leftItems.length === 0 && isEditMode ? (
+                  <div className="text-xs text-[#6B5E4C]/60 dark:text-[#B8ACA0]/60 italic p-4 text-center my-auto">
+                    (Left Column Empty — Drop items here)
+                  </div>
+                ) : (
+                  leftItems.map(item => (
+                    <div key={item.isTable ? `t-${item.tableId}` : `lm-${item.landmark?.id}`}>
+                      {item.isTable && item.tableId ? renderTableNode(item.tableId) : item.landmark ? renderLandmarkNode(item.landmark) : null}
+                    </div>
+                  ))
+                )}
               </div>
 
-              {/* Middle Column */}
-              <div className="flex flex-col gap-4 sm:gap-6 w-full items-center justify-center my-auto">
-                {middleItems.map(item => (
-                  <div key={item.isTable ? `t-${item.tableId}` : `lm-${item.landmark?.id}`}>
-                    {item.isTable && item.tableId ? renderTableNode(item.tableId) : item.landmark ? renderLandmarkNode(item.landmark) : null}
+              {/* Middle Column Drop Zone */}
+              <div
+                onDragOver={(e) => { e.preventDefault(); if (isEditMode) setDragOverCol('middle'); }}
+                onDragLeave={() => { if (isEditMode) setDragOverCol(null); }}
+                onDrop={(e) => { e.preventDefault(); if (isEditMode) handleDropOnColumn('middle'); }}
+                className={`flex flex-col gap-4 sm:gap-6 w-full items-center justify-center min-h-[12rem] ${getColumnStyle('middle')}`}
+              >
+                {isEditMode && (
+                  <div className="text-[10px] font-bold text-[#E37A08] dark:text-[#D2B48C] uppercase tracking-wider text-center flex items-center justify-center gap-1">
+                    <Move className="w-3 h-3" />
+                    <span>Middle Column (Drop Zone)</span>
                   </div>
-                ))}
+                )}
+                {middleItems.length === 0 && isEditMode ? (
+                  <div className="text-xs text-[#6B5E4C]/60 dark:text-[#B8ACA0]/60 italic p-4 text-center my-auto">
+                    (Middle Column Empty — Drop items here)
+                  </div>
+                ) : (
+                  middleItems.map(item => (
+                    <div key={item.isTable ? `t-${item.tableId}` : `lm-${item.landmark?.id}`}>
+                      {item.isTable && item.tableId ? renderTableNode(item.tableId) : item.landmark ? renderLandmarkNode(item.landmark) : null}
+                    </div>
+                  ))
+                )}
               </div>
 
-              {/* Right Column */}
-              <div className="flex flex-col gap-4 sm:gap-6 w-full items-center">
-                {rightItems.map(item => (
-                  <div key={item.isTable ? `t-${item.tableId}` : `lm-${item.landmark?.id}`}>
-                    {item.isTable && item.tableId ? renderTableNode(item.tableId) : item.landmark ? renderLandmarkNode(item.landmark) : null}
+              {/* Right Column Drop Zone */}
+              <div
+                onDragOver={(e) => { e.preventDefault(); if (isEditMode) setDragOverCol('right'); }}
+                onDragLeave={() => { if (isEditMode) setDragOverCol(null); }}
+                onDrop={(e) => { e.preventDefault(); if (isEditMode) handleDropOnColumn('right'); }}
+                className={`flex flex-col gap-4 sm:gap-6 w-full items-center min-h-[12rem] ${getColumnStyle('right')}`}
+              >
+                {isEditMode && (
+                  <div className="text-[10px] font-bold text-[#E37A08] dark:text-[#D2B48C] uppercase tracking-wider text-center flex items-center justify-center gap-1">
+                    <Move className="w-3 h-3" />
+                    <span>Right Column (Drop Zone)</span>
                   </div>
-                ))}
+                )}
+                {rightItems.length === 0 && isEditMode ? (
+                  <div className="text-xs text-[#6B5E4C]/60 dark:text-[#B8ACA0]/60 italic p-4 text-center my-auto">
+                    (Right Column Empty — Drop items here)
+                  </div>
+                ) : (
+                  rightItems.map(item => (
+                    <div key={item.isTable ? `t-${item.tableId}` : `lm-${item.landmark?.id}`}>
+                      {item.isTable && item.tableId ? renderTableNode(item.tableId) : item.landmark ? renderLandmarkNode(item.landmark) : null}
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>

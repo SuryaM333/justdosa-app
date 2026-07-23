@@ -6,6 +6,7 @@ import { dataService } from '../../services/dataService';
 import { getRequiredTableSeats } from '../../utils/bookingUtils';
 import { formatAusMobile, cleanPhoneNumber, isValidAusMobile } from '../../utils/phone';
 import { TimeWheelPicker, getAvailableTimeSlotsShared } from '../TimeWheelPicker';
+import { QuickNotesSelector } from '../QuickNotesSelector';
 
 interface NewBookingModalProps {
   isOpen: boolean;
@@ -575,6 +576,12 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
                 )}
               </motion.div>
             )}
+
+            {/* Quick Note Buttons */}
+            <QuickNotesSelector
+              currentNotes={notes}
+              onNotesChange={(updated) => setNotes(updated)}
+            />
 
             {/* Allergies & Notes */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

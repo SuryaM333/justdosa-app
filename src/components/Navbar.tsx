@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { Sun, Moon } from 'lucide-react';
 import { LOGO_BASE64 } from './logoBase64';
 
 interface NavbarProps {
@@ -16,6 +17,28 @@ export const Navbar: React.FC<NavbarProps> = ({
   unreadCount,
   onGoToModeChoice,
 }) => {
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('just_dosa_theme');
+      if (saved) return saved === 'dark';
+      return document.documentElement.classList.contains('dark');
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('just_dosa_theme', 'dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('just_dosa_theme', 'light');
+    }
+  }, [isDark]);
+
+  const toggleDarkMode = () => {
+    setIsDark(prev => !prev);
+  };
   return (
     <header className="sticky top-0 z-50 border-b bg-[#1C1917]/90 border-[#3D352E] text-[#FDFBF7] backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
@@ -63,10 +86,24 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Dark Mode Toggle Button */}
+          <button
+            onClick={toggleDarkMode}
+            className="p-2.5 rounded-xl bg-[#26221E] hover:bg-[#3D352E] text-[#D2B48C] hover:text-[#FF9F3B] transition-all border border-[#3D352E] shadow-sm cursor-pointer flex items-center justify-center"
+            title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            aria-label="Toggle dark mode"
+          >
+            {isDark ? (
+              <Sun className="w-4 h-4 text-amber-400" />
+            ) : (
+              <Moon className="w-4 h-4 text-[#D2B48C]" />
+            )}
+          </button>
+
           {isAdminRoute && (
             <button
               onClick={onExitAdmin}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#26221E] text-xs font-bold text-[#D2B48C] hover:bg-[#3D352E] transition-colors border border-[#3D352E] shadow-xs"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#26221E] text-xs font-bold text-[#D2B48C] hover:bg-[#3D352E] transition-colors border border-[#3D352E] shadow-xs cursor-pointer"
               title="Exit Admin to Customer View"
             >
               <span>Exit Admin</span>

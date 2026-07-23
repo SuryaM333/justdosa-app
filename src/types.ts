@@ -57,6 +57,7 @@ export interface Booking {
   serverName?: string;
   handledBy?: string;
   agreedConditions?: boolean;
+  reminderSent?: boolean;
 }
 
 export interface Table {
