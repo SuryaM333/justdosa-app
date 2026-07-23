@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Users, CheckCircle2, AlertTriangle, Ban, Clock, X, Check, Plus, UserCheck, DoorOpen, Bath, UtensilsCrossed, Store, Baby, GitMerge } from 'lucide-react';
-import { Table, Booking } from '../../types';
+import { Table, Booking, LandmarkPosition } from '../../types';
 import { dataService } from '../../services/dataService';
 import { getRequiredTableSeats, formatPartyBreakdownShort } from '../../utils/bookingUtils';
 import { parseToDate, safeGetElapsedMs } from '../../utils/dateUtils';
@@ -340,10 +340,27 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     <span>High Chair</span>
                   </div>
                 )}
-                <div className="flex items-center gap-1 text-[9px] text-[#6B5E4C] dark:text-[#B8ACA0]">
-                  <Clock className="w-3 h-3" />
-                  <span>{booking ? getSeatedDuration(booking.seatedAt) : '30m'}</span>
-                </div>
+                {(() => {
+                  const elapsedMs = booking ? safeGetElapsedMs(booking.seatedAt) : 0;
+                  const elapsedMins = Math.floor(elapsedMs / 60000);
+                  const isTimeUp = elapsedMins >= 60;
+                  const isAmber = elapsedMins >= 45 && elapsedMins < 60;
+                  const durText = booking ? getSeatedDuration(booking.seatedAt) : '30m';
+
+                  return (
+                    <div className={`flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded font-mono font-bold mt-0.5 ${
+                      isTimeUp
+                        ? 'bg-rose-600 text-white animate-pulse'
+                        : isAmber
+                        ? 'bg-amber-500 text-white'
+                        : 'text-[#6B5E4C] dark:text-[#B8ACA0]'
+                    }`}>
+                      <Clock className="w-2.5 h-2.5 shrink-0" />
+                      <span>{durText}</span>
+                      {isTimeUp && <span className="uppercase text-[8px] font-black">• Time up</span>}
+                    </div>
+                  );
+                })()}
               </div>
               <span className="text-[9px] uppercase font-bold text-rose-500 mt-1 bg-white/60 dark:bg-[#1C1917]/80 px-1.5 py-0.5 rounded border border-rose-300 dark:border-rose-800">
                 Tap to Free
@@ -518,65 +535,112 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Visual Grid with Landmarks:
-          Top Row: Door / Entry on Top-Left, Table 4 Top-Center
-          3 Columns: Left (Tables 10, 9, 8, Washroom), Middle (Diamonds 5, 6, 7, Kitchen), Right (Tables 3, 2, 1, Counter)
-      */}
-      <div className="py-4 bg-[#FFFDF7]/60 dark:bg-[#1C1917]/40 rounded-2xl border border-[#E8E2D2]/60 dark:border-[#3D352E]/60 p-4 sm:p-8">
-        {/* Top Row: Door / Entry on Top-Left, Table 4 Top-Center, Spacer Top-Right */}
-        <div className="grid grid-cols-3 gap-4 sm:gap-8 items-center justify-items-center mb-6">
-          <div className="flex justify-center w-full">
-            <div className="w-28 sm:w-36 h-20 sm:h-24 rounded-2xl bg-[#E8E2D2]/40 dark:bg-[#1C1917]/50 border-2 border-dashed border-[#A1917B]/60 dark:border-[#6B5E4C]/60 flex flex-col items-center justify-center p-2 text-center text-[#6B5E4C] dark:text-[#B8ACA0] shadow-inner select-none">
-              <DoorOpen className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C] mb-1" />
-              <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Door / Entry</span>
-              <span className="text-[9px] font-medium opacity-75">Main Entrance</span>
-            </div>
-          </div>
-          <div className="flex justify-center w-full">
-            {renderTableNode(4)}
-          </div>
-          <div className="w-full" />
-        </div>
+      {/* Visual Grid with Landmarks */}
+      {(() => {
+        const renderLandmarkNode = (lm: LandmarkPosition) => {
+          let icon = <DoorOpen className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C] mb-1" />;
+          let subtitle = 'Main Entrance';
+          if (lm.id === 'washroom') {
+            icon = <Bath className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C] mb-1" />;
+            subtitle = 'Restrooms';
+          } else if (lm.id === 'kitchen') {
+            icon = <UtensilsCrossed className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C] mb-1" />;
+            subtitle = 'Staff Only';
+          } else if (lm.id === 'counter') {
+            icon = <Store className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C] mb-1" />;
+            subtitle = 'Pay / Service';
+          }
 
-        {/* 3 Columns Layout with Bottom Landmarks */}
-        <div className="grid grid-cols-3 gap-4 sm:gap-8 items-center justify-items-center">
-          {/* Left Column: Tables 10, 9, 8, then Washroom */}
-          <div className="flex flex-col gap-4 sm:gap-6 w-full items-center">
-            {renderTableNode(10)}
-            {renderTableNode(9)}
-            {renderTableNode(8)}
-            <div className="w-28 sm:w-36 h-20 sm:h-24 mt-2 rounded-2xl bg-[#E8E2D2]/40 dark:bg-[#1C1917]/50 border-2 border-dashed border-[#A1917B]/60 dark:border-[#6B5E4C]/60 flex flex-col items-center justify-center p-2 text-center text-[#6B5E4C] dark:text-[#B8ACA0] shadow-inner select-none">
-              <Bath className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C] mb-1" />
-              <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Washroom</span>
-              <span className="text-[9px] font-medium opacity-75">Restrooms</span>
+          return (
+            <div key={`lm-${lm.id}`} className="w-28 sm:w-36 h-20 sm:h-24 my-2 rounded-2xl bg-[#E8E2D2]/40 dark:bg-[#1C1917]/50 border-2 border-dashed border-[#A1917B]/60 dark:border-[#6B5E4C]/60 flex flex-col items-center justify-center p-2 text-center text-[#6B5E4C] dark:text-[#B8ACA0] shadow-inner select-none mx-auto">
+              {icon}
+              <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider">{lm.name}</span>
+              <span className="text-[9px] font-medium opacity-75">{subtitle}</span>
             </div>
-          </div>
+          );
+        };
 
-          {/* Middle Column: Diamonds 5, 6, 7, then Kitchen */}
-          <div className="flex flex-col gap-6 sm:gap-8 w-full items-center justify-center my-auto">
-            {renderTableNode(5)}
-            {renderTableNode(6)}
-            {renderTableNode(7)}
-            <div className="w-28 sm:w-36 h-20 sm:h-24 mt-2 rounded-2xl bg-[#E8E2D2]/40 dark:bg-[#1C1917]/50 border-2 border-dashed border-[#A1917B]/60 dark:border-[#6B5E4C]/60 flex flex-col items-center justify-center p-2 text-center text-[#6B5E4C] dark:text-[#B8ACA0] shadow-inner select-none">
-              <UtensilsCrossed className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C] mb-1" />
-              <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Kitchen</span>
-              <span className="text-[9px] font-medium opacity-75">Staff Only</span>
-            </div>
-          </div>
+        const landmarks = dataService.getLandmarks();
 
-          {/* Right Column: Tables 3, 2, 1, then Counter */}
-          <div className="flex flex-col gap-4 sm:gap-6 w-full items-center">
-            {renderTableNode(3)}
-            {renderTableNode(2)}
-            {renderTableNode(1)}
-            <div className="w-28 sm:w-36 h-20 sm:h-24 mt-2 rounded-2xl bg-[#E8E2D2]/40 dark:bg-[#1C1917]/50 border-2 border-dashed border-[#A1917B]/60 dark:border-[#6B5E4C]/60 flex flex-col items-center justify-center p-2 text-center text-[#6B5E4C] dark:text-[#B8ACA0] shadow-inner select-none">
-              <Store className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C] mb-1" />
-              <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider">Counter</span>
-              <span className="text-[9px] font-medium opacity-75">Pay / Service</span>
+        interface ItemWrapper {
+          isTable: boolean;
+          tableId?: number;
+          landmark?: LandmarkPosition;
+          column: 'left' | 'middle' | 'right' | 'top';
+          order: number;
+        }
+
+        const allItems: ItemWrapper[] = [];
+
+        tables.forEach(t => {
+          const pos = t.position || getTableDefaultPosition(t.id);
+          allItems.push({
+            isTable: true,
+            tableId: t.id,
+            column: pos.column || 'right',
+            order: pos.order || 1
+          });
+        });
+
+        landmarks.forEach(lm => {
+          allItems.push({
+            isTable: false,
+            landmark: lm,
+            column: lm.position?.column || 'left',
+            order: lm.position?.order || 1
+          });
+        });
+
+        const topItems = allItems.filter(i => i.column === 'top').sort((a, b) => a.order - b.order);
+        const leftItems = allItems.filter(i => i.column === 'left').sort((a, b) => a.order - b.order);
+        const middleItems = allItems.filter(i => i.column === 'middle').sort((a, b) => a.order - b.order);
+        const rightItems = allItems.filter(i => i.column === 'right').sort((a, b) => a.order - b.order);
+
+        return (
+          <div className="py-4 bg-[#FFFDF7]/60 dark:bg-[#1C1917]/40 rounded-2xl border border-[#E8E2D2]/60 dark:border-[#3D352E]/60 p-4 sm:p-8">
+            {/* Top Row */}
+            {topItems.length > 0 && (
+              <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-8 mb-6">
+                {topItems.map(item => (
+                  <div key={item.isTable ? `t-${item.tableId}` : `lm-${item.landmark?.id}`}>
+                    {item.isTable && item.tableId ? renderTableNode(item.tableId) : item.landmark ? renderLandmarkNode(item.landmark) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 3 Columns Layout */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-8 items-start justify-items-center">
+              {/* Left Column */}
+              <div className="flex flex-col gap-4 sm:gap-6 w-full items-center">
+                {leftItems.map(item => (
+                  <div key={item.isTable ? `t-${item.tableId}` : `lm-${item.landmark?.id}`}>
+                    {item.isTable && item.tableId ? renderTableNode(item.tableId) : item.landmark ? renderLandmarkNode(item.landmark) : null}
+                  </div>
+                ))}
+              </div>
+
+              {/* Middle Column */}
+              <div className="flex flex-col gap-4 sm:gap-6 w-full items-center justify-center my-auto">
+                {middleItems.map(item => (
+                  <div key={item.isTable ? `t-${item.tableId}` : `lm-${item.landmark?.id}`}>
+                    {item.isTable && item.tableId ? renderTableNode(item.tableId) : item.landmark ? renderLandmarkNode(item.landmark) : null}
+                  </div>
+                ))}
+              </div>
+
+              {/* Right Column */}
+              <div className="flex flex-col gap-4 sm:gap-6 w-full items-center">
+                {rightItems.map(item => (
+                  <div key={item.isTable ? `t-${item.tableId}` : `lm-${item.landmark?.id}`}>
+                    {item.isTable && item.tableId ? renderTableNode(item.tableId) : item.landmark ? renderLandmarkNode(item.landmark) : null}
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* Override Confirmation Modal for Tables 5 & 6 (+1 chair) */}
       <AnimatePresence>

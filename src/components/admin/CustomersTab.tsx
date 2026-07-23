@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, ArrowUpDown, MessageSquare, ExternalLink, Sparkles, AlertTriangle, CheckCircle2, XCircle, Trash2, GitMerge, Edit3, ShieldAlert } from 'lucide-react';
+import { Search, ArrowUpDown, MessageSquare, ExternalLink, Sparkles, AlertTriangle, CheckCircle2, XCircle, Trash2, GitMerge, Edit3, ShieldAlert, Download } from 'lucide-react';
 import { Customer, Booking } from '../../types';
 import { getWhatsAppUrl } from '../../utils/phone';
 import { dataService } from '../../services/dataService';
@@ -100,6 +100,54 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
     if (onRefresh) onRefresh();
   };
 
+  const handleExportCSV = () => {
+    const headers = [
+      'First Name',
+      'Last Name',
+      'Phone / WhatsApp',
+      'Total Visits',
+      'Last Visit Date',
+      'VIP Status',
+      'Allergies / Preferences',
+      'Notes',
+      'WhatsApp Opt-In',
+      'No-Show Count',
+      'Visit History Details'
+    ];
+
+    const rows = sorted.map((c) => {
+      const custBookings = bookings ? bookings.filter(b => b.phone === c.phone) : [];
+      const visitHistoryStr = custBookings.map(b => {
+        const dateStr = b.bookingDate || safeFormatDate(b.createdAt);
+        const timeStr = b.timeSlot || '';
+        return `${dateStr}${timeStr ? ' @ ' + timeStr : ''} (Party: ${b.partySize}, Table: ${b.tableId || 'N/A'}, Status: ${b.status}${b.handledBy ? ', By: ' + b.handledBy : ''})`;
+      }).join('; ');
+
+      return [
+        `"${(c.firstName || '').replace(/"/g, '""')}"`,
+        `"${(c.lastName || '').replace(/"/g, '""')}"`,
+        `"${(c.phone || '').replace(/"/g, '""')}"`,
+        c.totalVisits || 0,
+        `"${(formatDate(c.lastVisitDate) || '').replace(/"/g, '""')}"`,
+        c.isVip ? 'YES' : 'NO',
+        `"${(c.allergies || '').replace(/"/g, '""')}"`,
+        `"${(c.notes || '').replace(/"/g, '""')}"`,
+        c.whatsappOptIn ? 'YES' : 'NO',
+        c.noShowCount || 0,
+        `"${visitHistoryStr.replace(/"/g, '""')}"`
+      ].join(',');
+    });
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `just_dosa_customer_data_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="space-y-4">
       {/* Top filter & stats bar */}
@@ -116,7 +164,16 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
         </div>
 
         <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-          <span className="text-xs text-[#6B5E4C] font-semibold uppercase tracking-wider shrink-0">
+          <button
+            onClick={handleExportCSV}
+            className="px-3.5 py-1.5 rounded-xl bg-[#8B4513] hover:bg-[#6e360e] text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all shrink-0 cursor-pointer"
+            title="Export full customer dataset to CSV"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Export CSV</span>
+          </button>
+
+          <span className="text-xs text-[#6B5E4C] font-semibold uppercase tracking-wider shrink-0 ml-2">
             Sort by:
           </span>
           <button

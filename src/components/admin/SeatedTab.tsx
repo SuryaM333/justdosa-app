@@ -14,6 +14,15 @@ interface SeatedTabProps {
 
 export const SeatedTab: React.FC<SeatedTabProps> = ({ bookings, tables, onRefresh }) => {
   const isOnline = dataService.isOnline();
+  const [, setTick] = React.useState(0);
+
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setTick((t) => t + 1);
+    }, 2000);
+    return () => clearInterval(timer);
+  }, []);
+
   const seatedList = bookings
     .filter((b) => b.status === 'seated')
     .sort((a, b) => {
@@ -21,10 +30,6 @@ export const SeatedTab: React.FC<SeatedTabProps> = ({ bookings, tables, onRefres
       const timeB = parseToDate(b.seatedAt)?.getTime() || 0;
       return timeB - timeA;
     });
-
-  const getSeatedDuration = (seatedAt?: string): string => {
-    return safeFormatSeatedDuration(seatedAt);
-  };
 
   const handleFinish = (tableId?: number, name?: string) => {
     if (!tableId) return;
@@ -129,14 +134,36 @@ export const SeatedTab: React.FC<SeatedTabProps> = ({ bookings, tables, onRefres
                       </div>
                     </div>
 
-                    <div className="text-right">
-                      <span className="text-[10px] uppercase font-bold text-[#6B5E4C] block">
-                        Duration
-                      </span>
-                      <span className="text-xs font-mono font-bold text-rose-600 dark:text-rose-400">
-                        {getSeatedDuration(booking.seatedAt)}
-                      </span>
-                    </div>
+                    {(() => {
+                      const elapsedMs = safeGetElapsedMs(booking.seatedAt);
+                      const elapsedMins = Math.floor(elapsedMs / 60000);
+                      const isTimeUp = elapsedMins >= 60;
+                      const isAmber = elapsedMins >= 45 && elapsedMins < 60;
+                      const formattedDur = safeFormatSeatedDuration(booking.seatedAt);
+
+                      return (
+                        <div className="text-right flex flex-col items-end">
+                          <span className="text-[10px] uppercase font-bold text-[#6B5E4C] block mb-0.5">
+                            Dining Timer (1h)
+                          </span>
+                          <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-xs font-mono font-bold transition-all ${
+                            isTimeUp
+                              ? 'bg-rose-500/15 border-rose-500/40 text-rose-600 dark:text-rose-400 animate-pulse'
+                              : isAmber
+                              ? 'bg-amber-500/15 border-amber-500/40 text-amber-700 dark:text-amber-400'
+                              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-400'
+                          }`}>
+                            <Clock className="w-3 h-3 shrink-0" />
+                            <span>{formattedDur}</span>
+                            {isTimeUp && (
+                              <span className="px-1.5 py-0.2 bg-rose-600 text-white text-[9px] font-black uppercase rounded tracking-wider shadow-xs">
+                                Time up
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-xs text-[#6B5E4C] dark:text-[#B8ACA0] mb-4">

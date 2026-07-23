@@ -4,7 +4,7 @@ import { Utensils, Clock, Calendar, Users, Baby, Phone, MessageSquare, CheckCirc
 import { Booking } from '../../types';
 import { dataService, db, sanitizeFirestoreIncoming } from '../../services/dataService';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { formatAusMobile, isValidAusMobile } from '../../utils/phone';
+import { formatAusMobile, isValidAusMobile, cleanPhoneNumber, getWhatsAppUrl } from '../../utils/phone';
 import { formatPartyBreakdown } from '../../utils/bookingUtils';
 import { safeFormatValidUntil } from '../../utils/dateUtils';
 import { SignatureDishShowcase } from './SignatureDishShowcase';
@@ -548,6 +548,11 @@ export const CustomerView: React.FC = () => {
                     </div>
                   </div>
                 )}
+                
+                <div className="mt-4 flex items-center justify-center gap-1.5 text-xs text-[#B8ACA0] font-medium opacity-90">
+                  <Clock className="w-3.5 h-3.5 text-[#D2B48C]" />
+                  <span>Table session: 1 hour from seating</span>
+                </div>
               </div>
             </motion.div>
           ) : (
@@ -984,7 +989,15 @@ export const CustomerView: React.FC = () => {
         )}
       </AnimatePresence>
 
-      <div className="min-h-[calc(100vh-4rem)] bg-[#12100E] bg-linear-to-b from-[#1C1917] via-[#151210] to-[#12100E] py-8 px-4 sm:px-6 relative overflow-hidden">
+      <div 
+        className="min-h-[calc(100vh-4rem)] bg-[#12100E] bg-linear-to-b from-[#1C1917] via-[#151210] to-[#12100E] py-8 px-4 sm:px-6 relative overflow-hidden bg-cover bg-center bg-no-repeat"
+        style={dataService.getCustomerBgUrl() ? { backgroundImage: `url('${dataService.getCustomerBgUrl()}')` } : undefined}
+      >
+        {/* Dark overlay for readability when custom background image is applied */}
+        {dataService.getCustomerBgUrl() && (
+          <div className="absolute inset-0 bg-[#12100E]/85 backdrop-blur-[1px] pointer-events-none z-0" />
+        )}
+
         {/* Subtle banana leaf background glow accent */}
         <div className="absolute top-0 right-0 w-64 h-64 bg-[#22C55E]/5 dark:bg-[#22C55E]/2 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute bottom-0 left-0 w-80 h-80 bg-[#E37A08]/5 dark:bg-[#E37A08]/2 rounded-full blur-3xl pointer-events-none" />
@@ -1147,7 +1160,7 @@ export const CustomerView: React.FC = () => {
                 </div>
 
                 <p className="text-sm text-[#6B5E4C] dark:text-[#B8ACA0] leading-relaxed">
-                  Your waitlist session is valid for 1 hour from booking. Please provide a WhatsApp-enabled mobile number so we can reach you about your table.
+                  Your session is valid for 1 hour from the time you are seated or place your order. Please provide a WhatsApp-enabled mobile number so we can reach you about your table.
                 </p>
 
                 <div className="pt-2">
@@ -1163,7 +1176,7 @@ export const CustomerView: React.FC = () => {
                         I agree to the booking conditions. *
                       </span>
                       <span className="text-[11px] text-[#A1917B] dark:text-[#9C8D7C] block mt-0.5">
-                        Required. I acknowledge that this waitlist entry is valid for 1 hour.
+                        Required. I acknowledge that table sessions are valid for 1 hour from seating or ordering.
                       </span>
                     </div>
                   </label>
@@ -1199,7 +1212,7 @@ export const CustomerView: React.FC = () => {
               <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
               <div>
                 <span className="font-bold block mb-1">Session Validity Notice</span>
-                Your booking session is valid for 1 hour. Please provide a WhatsApp-enabled mobile number so we can reach you.
+                Your session is valid for 1 hour from the time you are seated or place your order. Please provide a WhatsApp-enabled mobile number so we can reach you.
               </div>
             </div>
           )}
@@ -1299,16 +1312,7 @@ export const CustomerView: React.FC = () => {
                     })()}
                   </div>
                   <div>
-                    {getDayOfWeek(bookingDate) === 6 && dataService.isKalyanaEnabled() && saturdayMenuType === 'kalyana' ? (
-                      <div>
-                        <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
-                          Time Slot *
-                        </label>
-                        <div className="py-3 px-4 bg-[#F5F2EA] dark:bg-[#1C1917] text-[#2D2926] dark:text-white text-sm rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] font-medium">
-                          {kalyanaSlot.split(':')[0]} Selected
-                        </div>
-                      </div>
-                    ) : (
+                    {!(getDayOfWeek(bookingDate) === 6 && dataService.isKalyanaEnabled() && saturdayMenuType === 'kalyana') && (
                       <div>
                         <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
                           Time *
@@ -1351,9 +1355,8 @@ export const CustomerView: React.FC = () => {
                         type="button"
                         onClick={() => {
                           setSaturdayMenuType('kalyana');
-                          setKalyanaSlot(dataService.getKalyanaSlots()[0]?.range || 'Slot 1: 11:00am-12:30pm');
                         }}
-                        className={`py-2.5 px-3 rounded-xl font-bold text-xs border transition-all ${
+                        className={`py-2.5 px-3 rounded-xl font-bold text-xs border transition-all cursor-pointer ${
                           saturdayMenuType === 'kalyana'
                             ? 'bg-[#8B4513] text-white border-transparent shadow-sm'
                             : 'bg-white dark:bg-[#26221E] text-[#6B5E4C] dark:text-[#B8ACA0] border-[#E8E2D2] dark:border-[#3D352E]'
@@ -1366,7 +1369,7 @@ export const CustomerView: React.FC = () => {
                         onClick={() => {
                           setSaturdayMenuType('regular');
                         }}
-                        className={`py-2.5 px-3 rounded-xl font-bold text-xs border transition-all ${
+                        className={`py-2.5 px-3 rounded-xl font-bold text-xs border transition-all cursor-pointer ${
                           saturdayMenuType === 'regular'
                             ? 'bg-[#8B4513] text-white border-transparent shadow-sm'
                             : 'bg-white dark:bg-[#26221E] text-[#6B5E4C] dark:text-[#B8ACA0] border-[#E8E2D2] dark:border-[#3D352E]'
@@ -1376,60 +1379,60 @@ export const CustomerView: React.FC = () => {
                       </button>
                     </div>
 
-                    {/* Fixed seating slot selection */}
+                    {/* Notice card for Kalyana Virundhu staff contact */}
                     {saturdayMenuType === 'kalyana' && (
-                      <div className="pt-2 space-y-2">
-                        <span className="block text-xs font-bold text-[#8B4513] dark:text-[#D2B48C]">
-                          Choose your Seating Slot:
-                        </span>
-                        <div className="space-y-2">
-                          {dataService.getKalyanaSlots().map((slotObj) => {
-                            const slot = slotObj.range;
-                            const guestsInSlot = getSlotGuestsCount(slot);
-                            const capacity = slotObj.capacity;
-                            const available = capacity - guestsInSlot;
-                            const totalGuests = adultsCount + childrenCount;
-                            const isFull = available <= 0;
-                            const cannotFit = totalGuests > available;
+                      <div className="pt-2 space-y-3 border-t border-amber-500/20">
+                        {(() => {
+                          const restaurantPhone = dataService.getWhatsAppNumber();
+                          const formattedPhone = formatAusMobile(restaurantPhone);
+                          const cleanPhone = cleanPhoneNumber(restaurantPhone);
+                          const waUrl = getWhatsAppUrl(
+                            restaurantPhone,
+                            'Hi Just Dosa team, I would like to enquire / book for the Saturday Kalyana Virundhu feast.'
+                          );
 
-                            return (
-                              <button
-                                key={slot}
-                                type="button"
-                                disabled={isFull || cannotFit}
-                                onClick={() => setKalyanaSlot(slot)}
-                                className={`w-full p-3 rounded-xl border-2 text-left flex items-center justify-between transition-all ${
-                                  kalyanaSlot === slot
-                                    ? 'border-[#E37A08] bg-white dark:bg-[#26221E] shadow-sm'
-                                    : 'border-[#E8E2D2]/60 dark:border-[#3D352E]/60 bg-white/50 dark:bg-[#26221E]/30 disabled:opacity-40 disabled:cursor-not-allowed'
-                                }`}
-                              >
-                                <div>
-                                  <span className="font-serif font-bold text-xs text-[#2D2926] dark:text-white block">
-                                    {slot}
+                          return (
+                            <div className="p-4 rounded-xl bg-white dark:bg-[#26221E] border border-amber-400/40 shadow-xs space-y-3">
+                              <div className="flex items-start gap-2.5">
+                                <Sparkles className="w-5 h-5 text-[#E37A08] shrink-0 mt-0.5" />
+                                <div className="space-y-1">
+                                  <span className="font-serif font-bold text-sm text-[#8B4513] dark:text-[#D2B48C] block">
+                                    Kalyana Virundhu Feast Bookings
                                   </span>
-                                  <span className="text-[10px] text-[#6B5E4C] dark:text-[#B8ACA0]">
-                                    {isFull 
-                                      ? 'Fully Booked' 
-                                      : cannotFit 
-                                      ? `Needs ${totalGuests} seats, only ${available} left`
-                                      : `${available} of ${capacity} seats remaining`
-                                    }
-                                  </span>
+                                  <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0] leading-relaxed">
+                                    For Kalyana Virundhu feast bookings, please contact our staff on{' '}
+                                    <a
+                                      href={`tel:${cleanPhone}`}
+                                      className="font-bold text-[#8B4513] dark:text-[#E37A08] underline hover:opacity-80"
+                                    >
+                                      {formattedPhone}
+                                    </a>
+                                  </p>
                                 </div>
-                                {isFull ? (
-                                  <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-600">
-                                    Fully Booked
-                                  </span>
-                                ) : kalyanaSlot === slot ? (
-                                  <span className="w-4.5 h-4.5 rounded-full bg-[#E37A08] flex items-center justify-center text-white text-xs font-bold">
-                                    ✓
-                                  </span>
-                                ) : null}
-                              </button>
-                            );
-                          })}
-                        </div>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                                <a
+                                  href={`tel:${cleanPhone}`}
+                                  className="w-full py-2.5 px-3 rounded-xl bg-[#8B4513] hover:bg-[#72380E] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all"
+                                >
+                                  <Phone className="w-4 h-4" />
+                                  <span>Call {formattedPhone}</span>
+                                </a>
+
+                                <a
+                                  href={waUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="w-full py-2.5 px-3 rounded-xl bg-[#22C55E] hover:bg-[#1ea850] text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all"
+                                >
+                                  <MessageSquare className="w-4 h-4" />
+                                  <span>WhatsApp Us</span>
+                                </a>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
                   </div>
@@ -1437,192 +1440,197 @@ export const CustomerView: React.FC = () => {
               </motion.div>
             )}
 
-            {/* Adults and Children Counts */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5 flex justify-between">
-                  <span>Number of Adults *</span>
-                  <span className="text-[10px] text-[#E37A08] font-bold">{adultsCount} {adultsCount === 1 ? 'Adult' : 'Adults'}</span>
-                </label>
-                <div className="flex items-center gap-2 bg-[#FDFBF7] dark:bg-[#1C1917] p-1.5 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E]">
-                  <button
-                    type="button"
-                    disabled={adultsCount <= 1}
-                    onClick={() => handleAdultsCountChange(adultsCount - 1)}
-                    className="w-10 h-10 rounded-lg bg-white dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] shadow-sm font-bold text-lg text-[#2D2926] dark:text-white active:scale-95 disabled:opacity-50"
-                  >
-                    -
-                  </button>
-                  <span className="flex-1 text-center font-bold text-base text-[#2D2926] dark:text-white">
-                    {adultsCount}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={adultsCount + childrenCount >= 48}
-                    onClick={() => handleAdultsCountChange(adultsCount + 1)}
-                    className="w-10 h-10 rounded-lg bg-white dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] shadow-sm font-bold text-lg text-[#2D2926] dark:text-white active:scale-95 disabled:opacity-50"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5 flex justify-between">
-                  <span>Number of Children</span>
-                  <span className="text-[10px] text-[#8B4513] dark:text-[#D2B48C] font-bold">{childrenCount} {childrenCount === 1 ? 'Child' : 'Children'}</span>
-                </label>
-                <div className="flex items-center gap-2 bg-[#FDFBF7] dark:bg-[#1C1917] p-1.5 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E]">
-                  <button
-                    type="button"
-                    disabled={childrenCount <= 0}
-                    onClick={() => handleChildrenCountChange(childrenCount - 1)}
-                    className="w-10 h-10 rounded-lg bg-white dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] shadow-sm font-bold text-lg text-[#2D2926] dark:text-white active:scale-95 disabled:opacity-50"
-                  >
-                    -
-                  </button>
-                  <span className="flex-1 text-center font-bold text-base text-[#2D2926] dark:text-white">
-                    {childrenCount}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={adultsCount + childrenCount >= 48}
-                    onClick={() => handleChildrenCountChange(childrenCount + 1)}
-                    className="w-10 h-10 rounded-lg bg-white dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] shadow-sm font-bold text-lg text-[#2D2926] dark:text-white active:scale-95 disabled:opacity-50"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Custom note for large parties */}
-            {adultsCount + childrenCount > 10 && (
-              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-700 dark:text-amber-400">
-                <span className="font-bold">Large Party ({(adultsCount + childrenCount)} guests):</span> Our team will review your group size and arrange optimal seating or table joining upon confirmation.
-              </div>
-            )}
-
-            {/* High Chair Question for Children */}
-            {childrenCount > 0 && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                className="bg-[#F5F2EA] dark:bg-[#1C1917] p-4 rounded-2xl border border-[#E8E2D2] dark:border-[#3D352E] space-y-3"
-              >
-                <div className="flex items-center justify-between border-b border-[#E8E2D2] dark:border-[#3D352E] pb-2">
-                  <div className="flex items-center gap-1.5 font-bold text-xs text-[#8B4513] dark:text-[#D2B48C] uppercase tracking-wider">
-                    <Baby className="w-4 h-4 text-[#E37A08]" />
-                    <span>High Chair Requirements</span>
-                  </div>
-                  <span className="text-[10px] font-semibold text-[#E37A08] bg-[#E37A08]/10 px-2 py-0.5 rounded-md border border-[#E37A08]/30">
-                    High chairs don't take table seats!
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {Array.from({ length: childrenCount }).map((_, idx) => (
-                    <label
-                      key={idx}
-                      className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] cursor-pointer hover:border-[#E37A08] transition-all shadow-xs"
-                    >
-                      <span className="text-xs font-semibold text-[#2D2926] dark:text-white">
-                        Child #{idx + 1}: Needs High Chair?
-                      </span>
-                      <input
-                        type="checkbox"
-                        checked={childrenHighChairs[idx] || false}
-                        onChange={(e) => {
-                          const next = [...childrenHighChairs];
-                          next[idx] = e.target.checked;
-                          setChildrenHighChairs(next);
-                        }}
-                        className="w-4 h-4 rounded text-[#E37A08] focus:ring-[#E37A08] border-[#E8E2D2] dark:border-[#3D352E]"
-                      />
+            {/* Render online form fields and submit button only if NOT Kalyana Virundhu on Saturday */}
+            {!(getDayOfWeek(bookingDate) === 6 && dataService.isKalyanaEnabled() && saturdayMenuType === 'kalyana') && (
+              <>
+                {/* Adults and Children Counts */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5 flex justify-between">
+                      <span>Number of Adults *</span>
+                      <span className="text-[10px] text-[#E37A08] font-bold">{adultsCount} {adultsCount === 1 ? 'Adult' : 'Adults'}</span>
                     </label>
-                  ))}
-                </div>
-              </motion.div>
-            )}
+                    <div className="flex items-center gap-2 bg-[#FDFBF7] dark:bg-[#1C1917] p-1.5 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E]">
+                      <button
+                        type="button"
+                        disabled={adultsCount <= 1}
+                        onClick={() => handleAdultsCountChange(adultsCount - 1)}
+                        className="w-10 h-10 rounded-lg bg-white dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] shadow-sm font-bold text-lg text-[#2D2926] dark:text-white active:scale-95 disabled:opacity-50"
+                      >
+                        -
+                      </button>
+                      <span className="flex-1 text-center font-bold text-base text-[#2D2926] dark:text-white">
+                        {adultsCount}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={adultsCount + childrenCount >= 48}
+                        onClick={() => handleAdultsCountChange(adultsCount + 1)}
+                        className="w-10 h-10 rounded-lg bg-white dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] shadow-sm font-bold text-lg text-[#2D2926] dark:text-white active:scale-95 disabled:opacity-50"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
 
-            {/* Allergies & Notes */}
-            {!showNotesField ? (
-              <div className="pt-1">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5 flex justify-between">
+                      <span>Number of Children</span>
+                      <span className="text-[10px] text-[#8B4513] dark:text-[#D2B48C] font-bold">{childrenCount} {childrenCount === 1 ? 'Child' : 'Children'}</span>
+                    </label>
+                    <div className="flex items-center gap-2 bg-[#FDFBF7] dark:bg-[#1C1917] p-1.5 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E]">
+                      <button
+                        type="button"
+                        disabled={childrenCount <= 0}
+                        onClick={() => handleChildrenCountChange(childrenCount - 1)}
+                        className="w-10 h-10 rounded-lg bg-white dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] shadow-sm font-bold text-lg text-[#2D2926] dark:text-white active:scale-95 disabled:opacity-50"
+                      >
+                        -
+                      </button>
+                      <span className="flex-1 text-center font-bold text-base text-[#2D2926] dark:text-white">
+                        {childrenCount}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={adultsCount + childrenCount >= 48}
+                        onClick={() => handleChildrenCountChange(childrenCount + 1)}
+                        className="w-10 h-10 rounded-lg bg-white dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] shadow-sm font-bold text-lg text-[#2D2926] dark:text-white active:scale-95 disabled:opacity-50"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Custom note for large parties */}
+                {adultsCount + childrenCount > 10 && (
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-700 dark:text-amber-400">
+                    <span className="font-bold">Large Party ({(adultsCount + childrenCount)} guests):</span> Our team will review your group size and arrange optimal seating or table joining upon confirmation.
+                  </div>
+                )}
+
+                {/* High Chair Question for Children */}
+                {childrenCount > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="bg-[#F5F2EA] dark:bg-[#1C1917] p-4 rounded-2xl border border-[#E8E2D2] dark:border-[#3D352E] space-y-3"
+                  >
+                    <div className="flex items-center justify-between border-b border-[#E8E2D2] dark:border-[#3D352E] pb-2">
+                      <div className="flex items-center gap-1.5 font-bold text-xs text-[#8B4513] dark:text-[#D2B48C] uppercase tracking-wider">
+                        <Baby className="w-4 h-4 text-[#E37A08]" />
+                        <span>High Chair Requirements</span>
+                      </div>
+                      <span className="text-[10px] font-semibold text-[#E37A08] bg-[#E37A08]/10 px-2 py-0.5 rounded-md border border-[#E37A08]/30">
+                        High chairs don't take table seats!
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {Array.from({ length: childrenCount }).map((_, idx) => (
+                        <label
+                          key={idx}
+                          className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] cursor-pointer hover:border-[#E37A08] transition-all shadow-xs"
+                        >
+                          <span className="text-xs font-semibold text-[#2D2926] dark:text-white">
+                            Child #{idx + 1}: Needs High Chair?
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={childrenHighChairs[idx] || false}
+                            onChange={(e) => {
+                              const next = [...childrenHighChairs];
+                              next[idx] = e.target.checked;
+                              setChildrenHighChairs(next);
+                            }}
+                            className="w-4 h-4 rounded text-[#E37A08] focus:ring-[#E37A08] border-[#E8E2D2] dark:border-[#3D352E]"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Allergies & Notes */}
+                {!showNotesField ? (
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowNotesField(true)}
+                      className="text-xs font-bold text-[#E37A08] hover:text-[#c96906] transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>+ Add allergies, dietary preferences or special notes</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
+                        Allergies & Preferences
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. No gluten, window table"
+                        value={allergies}
+                        onChange={(e) => setAllergies(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
+                        General Notes
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Celebrating Anniversary"
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Optional WhatsApp Checkbox */}
+                <div className="pt-2">
+                  <label className="flex items-start gap-3 p-3 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={whatsappOptIn}
+                      onChange={(e) => setWhatsappOptIn(e.target.checked)}
+                      className="mt-0.5 w-4 h-4 rounded text-[#E37A08] focus:ring-[#E37A08] border-[#E8E2D2]"
+                    />
+                    <div>
+                      <span className="text-xs font-semibold text-[#2D2926] dark:text-white flex items-center gap-1.5">
+                        <MessageSquare className="w-3.5 h-3.5 text-[#22C55E]" />
+                        Send me offers and updates on WhatsApp
+                      </span>
+                      <span className="text-[11px] text-[#A1917B] dark:text-[#9C8D7C] block mt-0.5">
+                        Optional. Receive exclusive specials and dosa festival invitations. Unchecked by default.
+                      </span>
+                    </div>
+                  </label>
+                </div>
+
+                {/* Submit Button */}
                 <button
-                  type="button"
-                  onClick={() => setShowNotesField(true)}
-                  className="text-xs font-bold text-[#E37A08] hover:text-[#c96906] transition-colors flex items-center gap-1 cursor-pointer"
+                  type="submit"
+                  disabled={
+                    (getDayOfWeek(bookingDate) === 2 && activeTab === 'remote')
+                  }
+                  className={`w-full py-4 rounded-xl font-bold text-white text-base shadow-lg transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
+                    activeTab === 'walk-in'
+                      ? 'bg-[#E37A08] hover:bg-[#C96905] shadow-[#E37A08]/20'
+                      : 'bg-[#8B4513] hover:bg-[#72380E] shadow-[#8B4513]/20'
+                  }`}
                 >
-                  <span>+ Add allergies, dietary preferences or special notes</span>
+                  <span>{activeTab === 'walk-in' ? 'Join Live Waitlist' : 'Confirm Table Reservation'}</span>
                 </button>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
-                    Allergies & Preferences
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. No gluten, window table"
-                    value={allergies}
-                    onChange={(e) => setAllergies(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
-                    General Notes
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Celebrating Anniversary"
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
-                  />
-                </div>
-              </div>
+              </>
             )}
-
-            {/* Optional WhatsApp Checkbox */}
-            <div className="pt-2">
-              <label className="flex items-start gap-3 p-3 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={whatsappOptIn}
-                  onChange={(e) => setWhatsappOptIn(e.target.checked)}
-                  className="mt-0.5 w-4 h-4 rounded text-[#E37A08] focus:ring-[#E37A08] border-[#E8E2D2]"
-                />
-                <div>
-                  <span className="text-xs font-semibold text-[#2D2926] dark:text-white flex items-center gap-1.5">
-                    <MessageSquare className="w-3.5 h-3.5 text-[#22C55E]" />
-                    Send me offers and updates on WhatsApp
-                  </span>
-                  <span className="text-[11px] text-[#A1917B] dark:text-[#9C8D7C] block mt-0.5">
-                    Optional. Receive exclusive specials and dosa festival invitations. Unchecked by default.
-                  </span>
-                </div>
-              </label>
-            </div>
-
-            {/* Submit Button */}
-            <button
-              type="submit"
-              disabled={
-                (getDayOfWeek(bookingDate) === 2 && activeTab === 'remote')
-              }
-              className={`w-full py-4 rounded-xl font-bold text-white text-base shadow-lg transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
-                activeTab === 'walk-in'
-                  ? 'bg-[#E37A08] hover:bg-[#C96905] shadow-[#E37A08]/20'
-                  : 'bg-[#8B4513] hover:bg-[#72380E] shadow-[#8B4513]/20'
-              }`}
-            >
-              <span>{activeTab === 'walk-in' ? 'Join Live Waitlist' : 'Confirm Table Reservation'}</span>
-            </button>
           </form>
-          </>
-        )}
+        </>
+      )}
       </motion.div>
       </motion.div>
     </motion.div>

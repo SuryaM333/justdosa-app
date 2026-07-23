@@ -16,14 +16,16 @@ import {
   X,
   AlertTriangle,
   Info,
-  Phone
+  Phone,
+  Palette,
+  Image as ImageIcon
 } from 'lucide-react';
 import { dataService } from '../../services/dataService';
-import { Table } from '../../types';
+import { Table, LandmarkPosition } from '../../types';
 
 export const SettingsTab: React.FC = () => {
   // Navigation for Sub-Tabs
-  const [activeSubTab, setActiveSubTab] = useState<'hours' | 'kalyana' | 'tables' | 'texts' | 'security' | 'device'>('hours');
+  const [activeSubTab, setActiveSubTab] = useState<'hours' | 'kalyana' | 'tables' | 'texts' | 'appearance' | 'security' | 'device'>('hours');
 
   // Form states initialized with live data from dataService
   const [staffPin, setStaffPin] = useState('');
@@ -38,6 +40,8 @@ export const SettingsTab: React.FC = () => {
   const [waitTimeAlertThresholds, setWaitTimeAlertThresholds] = useState(() => ({ ...dataService.getWaitTimeAlertThresholds() }));
   const [openingHours, setOpeningHours] = useState(() => JSON.parse(JSON.stringify(dataService.getOpeningHours())));
   const [tables, setTables] = useState<Table[]>([]);
+  const [landmarks, setLandmarks] = useState<LandmarkPosition[]>(() => dataService.getLandmarks().map(l => ({ ...l })));
+  const [customerBgUrl, setCustomerBgUrl] = useState(() => dataService.getCustomerBgUrl());
   const [staffList, setStaffList] = useState<string[]>(() => dataService.getStaffList());
   const [newStaffName, setNewStaffName] = useState('');
 
@@ -72,6 +76,8 @@ export const SettingsTab: React.FC = () => {
       setWaitTimeAlertThresholds({ ...dataService.getWaitTimeAlertThresholds() });
       setOpeningHours(JSON.parse(JSON.stringify(dataService.getOpeningHours())));
       setTables(dataService.getTables().map(t => ({ ...t })));
+      setLandmarks(dataService.getLandmarks().map(l => ({ ...l })));
+      setCustomerBgUrl(dataService.getCustomerBgUrl());
       setStaffList(dataService.getStaffList());
       setIsInitialized(true);
     };
@@ -238,9 +244,13 @@ export const SettingsTab: React.FC = () => {
           high: parseInt(waitTimeAlertThresholds.high as any, 10)
         },
         openingHours: formattedOpeningHours,
+        customerBgUrl,
+        landmarks,
       };
 
       await dataService.saveAllSettings(payload);
+      await dataService.setCustomerBgUrl(customerBgUrl);
+      await dataService.setLandmarks(landmarks);
       await dataService.setStaffList(staffList);
 
       // If a new Staff PIN was typed, save its hash and clear input
@@ -438,6 +448,18 @@ export const SettingsTab: React.FC = () => {
           >
             <MessageSquare className="w-4 h-4" />
             <span>Customer Texts</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('appearance')}
+            className={`w-full text-left px-4 py-3 rounded-2xl text-xs font-bold flex items-center gap-2.5 transition-all ${
+              activeSubTab === 'appearance'
+                ? 'bg-[#E37A08] text-white shadow-md shadow-[#E37A08]/10'
+                : 'bg-white dark:bg-[#26221E] text-[#6B5E4C] dark:text-[#B8ACA0] hover:bg-[#F5F2EA] dark:hover:bg-[#3D352E] border border-[#E8E2D2] dark:border-[#3D352E]'
+            }`}
+          >
+            <Palette className="w-4 h-4" />
+            <span>Appearance</span>
           </button>
 
           <button
@@ -936,9 +958,120 @@ export const SettingsTab: React.FC = () => {
                             />
                           </div>
                         </div>
+
+                        {/* Floor Plan Position Repositioning Controls */}
+                        <div className="pt-2 border-t border-[#E8E2D2]/40 dark:border-[#3D352E]/40 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-[10px] text-[#6B5E4C] dark:text-[#B8ACA0] uppercase mb-1 font-bold">
+                              Floor Plan Grid Column
+                            </label>
+                            <select
+                              value={table.position?.column || 'left'}
+                              onChange={(e) => {
+                                const updated = [...tables];
+                                const col = e.target.value as 'left' | 'middle' | 'right' | 'top';
+                                updated[index].position = {
+                                  column: col,
+                                  order: updated[index].position?.order || (index + 1),
+                                  isDiamond: updated[index].position?.isDiamond
+                                };
+                                setTables(updated);
+                              }}
+                              className="w-full px-2.5 py-1.5 rounded-lg border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-xs font-semibold text-[#2D2926] dark:text-white"
+                            >
+                              <option value="top">Top Section (Header)</option>
+                              <option value="left">Left Column</option>
+                              <option value="middle">Middle Column</option>
+                              <option value="right">Right Column</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] text-[#6B5E4C] dark:text-[#B8ACA0] uppercase mb-1 font-bold">
+                              Position Row Order
+                            </label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={10}
+                              value={table.position?.order || (index + 1)}
+                              onChange={(e) => {
+                                const updated = [...tables];
+                                const order = parseInt(e.target.value, 10) || 1;
+                                updated[index].position = {
+                                  column: updated[index].position?.column || 'left',
+                                  order,
+                                  isDiamond: updated[index].position?.isDiamond
+                                };
+                                setTables(updated);
+                              }}
+                              className="w-full px-2.5 py-1.5 rounded-lg border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-xs font-semibold text-[#2D2926] dark:text-white"
+                            />
+                          </div>
+                        </div>
                       </div>
                     );
                   })}
+                </div>
+
+                {/* Landmark Floorplan Repositioning Controls */}
+                <div className="pt-6 border-t border-[#E8E2D2]/60 dark:border-[#3D352E]/60 space-y-4">
+                  <div>
+                    <h4 className="font-serif font-bold text-sm text-[#2D2926] dark:text-white">
+                      Landmark Floorplan Positions (Door, Washroom, Kitchen, Counter)
+                    </h4>
+                    <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0] mt-0.5">
+                      Reposition venue landmarks on the floor plan grid (column & row order) to match your physical floor plan.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {landmarks.map((landmark, lIdx) => (
+                      <div key={landmark.id} className="p-3.5 rounded-2xl border border-[#E8E2D2]/60 dark:border-[#3D352E]/60 bg-[#FDFBF7] dark:bg-[#1C1917]/30 space-y-3">
+                        <span className="font-bold text-xs text-[#8B4513] dark:text-[#D2B48C]">
+                          {landmark.name}
+                        </span>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div>
+                            <label className="block text-[10px] text-[#6B5E4C] dark:text-[#B8ACA0] uppercase mb-1 font-bold">
+                              Grid Column
+                            </label>
+                            <select
+                              value={landmark.position.column}
+                              onChange={(e) => {
+                                const updated = [...landmarks];
+                                updated[lIdx].position.column = e.target.value as any;
+                                setLandmarks(updated);
+                              }}
+                              className="w-full px-2 py-1.5 rounded-lg border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-xs font-semibold text-[#2D2926] dark:text-white"
+                            >
+                              <option value="top">Top Section</option>
+                              <option value="left">Left Column</option>
+                              <option value="middle">Middle Column</option>
+                              <option value="right">Right Column</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-[#6B5E4C] dark:text-[#B8ACA0] uppercase mb-1 font-bold">
+                              Row Order
+                            </label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={10}
+                              value={landmark.position.order}
+                              onChange={(e) => {
+                                const updated = [...landmarks];
+                                updated[lIdx].position.order = parseInt(e.target.value, 10) || 1;
+                                setLandmarks(updated);
+                              }}
+                              className="w-full px-2 py-1.5 rounded-lg border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-xs font-semibold text-[#2D2926] dark:text-white"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Sub-Save Button */}
@@ -1061,6 +1194,113 @@ export const SettingsTab: React.FC = () => {
                     <Save className="w-4 h-4" />
                     <span>Save Configuration</span>
                   </button>
+                </div>
+              </div>
+            )}
+
+            {/* 🎨 APPEARANCE SUB-TAB */}
+            {activeSubTab === 'appearance' && (
+              <div className="bg-white dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] rounded-3xl p-6 shadow-xs space-y-6">
+                <div>
+                  <h3 className="text-base font-serif font-bold text-[#2D2926] dark:text-white flex items-center gap-2">
+                    <Palette className="w-4 h-4 text-[#E37A08]" />
+                    Customer Landing Page Appearance
+                  </h3>
+                  <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0] mt-0.5">
+                    Set a custom background image URL for the customer registration & queue terminal screen.
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase">
+                      Background Image URL
+                    </label>
+                    <input 
+                      type="text"
+                      value={customerBgUrl}
+                      onChange={(e) => setCustomerBgUrl(e.target.value)}
+                      placeholder="https://images.unsplash.com/... or paste image URL"
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-[#FDFBF7] dark:bg-[#1C1917] text-sm text-[#2D2926] dark:text-white font-mono focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
+                    />
+                    <span className="text-[10px] text-[#6B5E4C]/80 dark:text-[#B8ACA0]/80 block">
+                      Paste a high-resolution image URL. The dark overlay will be preserved for readability. Leave blank to use default dark luxury look.
+                    </span>
+                  </div>
+
+                  {/* Preset Samples */}
+                  <div className="space-y-2">
+                    <span className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase">
+                      Sample High-Res Presets
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCustomerBgUrl('https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1920&q=80')}
+                        className="px-3 py-1.5 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-xs font-medium text-[#2D2926] dark:text-white hover:border-[#E37A08] transition-colors cursor-pointer"
+                      >
+                        Warm Dining Ambience
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCustomerBgUrl('https://images.unsplash.com/photo-1555396273-367ea4eb4db5?auto=format&fit=crop&w=1920&q=80')}
+                        className="px-3 py-1.5 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-xs font-medium text-[#2D2926] dark:text-white hover:border-[#E37A08] transition-colors cursor-pointer"
+                      >
+                        Rustic Feast Setup
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCustomerBgUrl('https://images.unsplash.com/photo-1610057099443-fde8c4d50f91?auto=format&fit=crop&w=1920&q=80')}
+                        className="px-3 py-1.5 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-xs font-medium text-[#2D2926] dark:text-white hover:border-[#E37A08] transition-colors cursor-pointer"
+                      >
+                        South Indian Feast
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCustomerBgUrl('')}
+                        className="px-3 py-1.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs font-medium text-rose-700 dark:text-rose-300 hover:bg-rose-100 transition-colors cursor-pointer"
+                      >
+                        Clear (Use Default)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Live Preview Box */}
+                  <div className="space-y-2">
+                    <span className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase">
+                      Live Customer View Preview
+                    </span>
+                    <div 
+                      className="relative h-48 rounded-2xl overflow-hidden border border-[#E8E2D2] dark:border-[#3D352E] bg-[#1a0c00] flex items-center justify-center p-6 text-center bg-cover bg-center"
+                      style={{ backgroundImage: customerBgUrl ? `url(${customerBgUrl})` : 'none' }}
+                    >
+                      {/* Dark Overlay */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/75 to-black/80" />
+                      
+                      <div className="relative z-10 space-y-2 text-white">
+                        <h4 className="font-serif font-bold text-lg text-amber-100">JUST DOSA</h4>
+                        <p className="text-xs text-amber-200/80 max-w-sm mx-auto">
+                          {customerTexts.welcomeLine || 'Select an option below to join the live queue or reserve for later.'}
+                        </p>
+                        <div className="pt-2">
+                          <span className="inline-block px-4 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-black font-extrabold text-xs shadow-md">
+                            Walk-In Queue
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Save Button */}
+                  <div className="flex justify-end pt-3">
+                    <button
+                      type="submit"
+                      className="px-5 py-3 rounded-2xl bg-[#E37A08] hover:bg-[#c96906] text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Save className="w-4 h-4" />
+                      <span>Save Configuration</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             )}

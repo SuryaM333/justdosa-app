@@ -1,4 +1,4 @@
-import { Booking, Customer, DailyStats, Table } from '../types';
+import { Booking, Customer, DailyStats, Table, LandmarkPosition } from '../types';
 import { cleanPhoneNumber, formatAusMobile } from '../utils/phone';
 import { playNewBookingChime } from '../utils/sound';
 import { getRequiredTableSeats } from '../utils/bookingUtils';
@@ -280,7 +280,14 @@ const DEFAULT_SETTINGS = {
     medium: 15,
     high: 20
   },
-  staffList: ['Amrit', 'Sanjay', 'Vasu']
+  staffList: ['Amrit', 'Sanjay', 'Vasu'],
+  customerBgUrl: '',
+  landmarks: [
+    { id: 'door', name: 'Door / Entry', position: { column: 'left', order: 1 } },
+    { id: 'washroom', name: 'Washroom', position: { column: 'left', order: 5 } },
+    { id: 'kitchen', name: 'Kitchen', position: { column: 'middle', order: 5 } },
+    { id: 'counter', name: 'Counter', position: { column: 'right', order: 5 } },
+  ]
 };
 
 const INITIAL_TABLES: Table[] = [
@@ -435,8 +442,23 @@ function initFirestoreSync() {
         }
       } else {
         const tables: Table[] = [];
-        querySnap.forEach((doc) => {
-          tables.push(sanitizeFirestoreIncoming(doc.data() as Table));
+        querySnap.forEach((docSnap) => {
+          const raw = docSnap.data() as any;
+          const data = sanitizeFirestoreIncoming(raw) as Table;
+          if (data) {
+            // Guarantee ID type safety as number
+            data.id = typeof data.id === 'string' ? parseInt(data.id, 10) : Number(data.id || docSnap.id);
+            if (isNaN(data.id)) {
+              data.id = parseInt(docSnap.id, 10) || 0;
+            }
+            if (data.mergedWith !== undefined && data.mergedWith !== null) {
+              data.mergedWith = Number(data.mergedWith);
+              if (isNaN(data.mergedWith)) {
+                data.mergedWith = undefined;
+              }
+            }
+            tables.push(data);
+          }
         });
 
         tables.sort((a, b) => a.id - b.id);
@@ -753,6 +775,35 @@ export const dataService = {
   async setWaitTimeAlertThresholds(waitTimeAlertThresholds: { low: number; medium: number; high: number }) {
     try {
       await safeSetDoc(doc(db, 'settings', 'global'), { waitTimeAlertThresholds }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  getCustomerBgUrl(): string {
+    return (cachedSettings && typeof cachedSettings.customerBgUrl === 'string')
+      ? cachedSettings.customerBgUrl
+      : DEFAULT_SETTINGS.customerBgUrl;
+  },
+
+  async setCustomerBgUrl(customerBgUrl: string) {
+    try {
+      await safeSetDoc(doc(db, 'settings', 'global'), { customerBgUrl }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  getLandmarks(): LandmarkPosition[] {
+    if (cachedSettings && Array.isArray(cachedSettings.landmarks) && cachedSettings.landmarks.length > 0) {
+      return cachedSettings.landmarks;
+    }
+    return DEFAULT_SETTINGS.landmarks as LandmarkPosition[];
+  },
+
+  async setLandmarks(landmarks: LandmarkPosition[]) {
+    try {
+      await safeSetDoc(doc(db, 'settings', 'global'), { landmarks }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -1416,7 +1467,7 @@ export const dataService = {
         const booking = bookingSnap.data() as Booking;
 
         if (table.isInactive) {
-          return { success: false, error: 'Cannot allocate to inactive Table 7' };
+          return { success: false, error: `Cannot allocate to inactive ${table.name || `Table ${tableId}`}` };
         }
 
         if (table.isOccupied) {

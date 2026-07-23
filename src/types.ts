@@ -86,5 +86,14 @@ export interface DailyStats {
   hourlyBookings: { hour: string; count: number }[];
 }
 
+export interface LandmarkPosition {
+  id: 'door' | 'washroom' | 'kitchen' | 'counter' | string;
+  name: string;
+  position: {
+    column: 'left' | 'middle' | 'right' | 'top';
+    order: number;
+  };
+}
+
 export type AdminTab = 'waiting' | 'booked' | 'seated' | 'customers' | 'summary' | 'settings';
 
