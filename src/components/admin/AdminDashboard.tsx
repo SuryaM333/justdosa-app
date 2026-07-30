@@ -11,6 +11,7 @@ import { SummaryTab } from './SummaryTab';
 import { SettingsTab } from './SettingsTab';
 import { NewBookingModal } from './NewBookingModal';
 import { playNewBookingChime } from '../../utils/sound';
+import { getLocalDateStr } from '../../utils/dateUtils';
 
 interface AdminDashboardProps {
   adminRole: AdminRole;
@@ -146,9 +147,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole }) => 
     }
   }, [activeTab]);
 
+  const todayStr = getLocalDateStr();
   const waitingCount = bookings.filter((b) => b.status === 'waiting').length;
   const bookedCount = bookings.filter(
-    (b) => b.type === 'remote' && ['pending', 'booked', 'confirmed', 'alternative_proposed'].includes(b.status)
+    (b) => b.type === 'remote' && 
+           ['pending', 'booked', 'confirmed', 'alternative_proposed'].includes(b.status) &&
+           (!b.bookingDate || b.bookingDate >= todayStr)
   ).length;
   const seatedCount = bookings.filter((b) => b.status === 'seated').length;
   const unreadWaiting = bookings.filter((b) => b.status === 'waiting' && b.isNewAlert).length;
@@ -157,7 +161,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole }) => 
   ).length;
 
   useEffect(() => {
-    if (adminRole === 'staff' && (activeTab === 'customers' || activeTab === 'summary' || activeTab === 'settings')) {
+    if (adminRole === 'staff' && (activeTab === 'summary' || activeTab === 'settings')) {
       setActiveTab('waiting');
     }
   }, [adminRole, activeTab]);
@@ -314,6 +318,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole }) => 
               selectedWaitingBooking={selectedWaitingBooking}
               onSelectWaitingBooking={setSelectedWaitingBooking}
               onTableUpdated={loadData}
+              adminRole={adminRole}
             />
           </div>
         )}
@@ -377,24 +382,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole }) => 
             </span>
           </button>
 
-          {adminRole === 'owner' && (
-            <button
-              onClick={() => setActiveTab('customers')}
-              className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all shrink-0 ${
-                activeTab === 'customers'
-                  ? 'bg-[#E37A08] text-white shadow-md shadow-[#E37A08]/20'
-                  : 'bg-white dark:bg-[#26221E] text-[#6B5E4C] dark:text-[#B8ACA0] hover:bg-[#F5F2EA] dark:hover:bg-[#3D352E] border border-[#E8E2D2] dark:border-[#3D352E]'
-              }`}
-            >
-              <UserCheck className="w-4 h-4" />
-              <span>Customer Data</span>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
-                activeTab === 'customers' ? 'bg-white text-[#8B4513]' : 'bg-[#F5F2EA] dark:bg-[#1C1917] text-[#8B4513] dark:text-[#D2B48C] border border-[#E8E2D2] dark:border-[#3D352E]'
-              }`}>
-                {Object.keys(customers).length}
-              </span>
-            </button>
-          )}
+          <button
+            onClick={() => setActiveTab('customers')}
+            className={`px-4 py-2.5 rounded-2xl text-xs sm:text-sm font-bold flex items-center gap-2 transition-all shrink-0 ${
+              activeTab === 'customers'
+                ? 'bg-[#E37A08] text-white shadow-md shadow-[#E37A08]/20'
+                : 'bg-white dark:bg-[#26221E] text-[#6B5E4C] dark:text-[#B8ACA0] hover:bg-[#F5F2EA] dark:hover:bg-[#3D352E] border border-[#E8E2D2] dark:border-[#3D352E]'
+            }`}
+          >
+            <UserCheck className="w-4 h-4" />
+            <span>Customer Data</span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+              activeTab === 'customers' ? 'bg-white text-[#8B4513]' : 'bg-[#F5F2EA] dark:bg-[#1C1917] text-[#8B4513] dark:text-[#D2B48C] border border-[#E8E2D2] dark:border-[#3D352E]'
+            }`}>
+              {Object.keys(customers).length}
+            </span>
+          </button>
 
           {adminRole === 'owner' && (
             <button
@@ -438,7 +441,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole }) => 
             <SeatedTab bookings={bookings} tables={tables} onRefresh={loadData} />
           )}
 
-          {activeTab === 'customers' && adminRole === 'owner' && (
+          {activeTab === 'customers' && (
             <CustomersTab customers={customers} bookings={bookings} adminRole={adminRole} onRefresh={loadData} />
           )}
 

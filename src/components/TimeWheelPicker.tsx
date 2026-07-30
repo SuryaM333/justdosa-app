@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { dataService } from '../services/dataService';
+import { getLocalDateStr, getLocalTimeMins } from '../utils/dateUtils';
 
 export interface TimeSlot {
   value: string; // e.g., "18:30"
@@ -16,15 +17,26 @@ export const getDayOfWeek = (dateStr: string) => {
 };
 
 export const getAvailableTimeSlotsShared = (dateStr: string): TimeSlot[] => {
+  if (!dateStr) return [];
+  const todayStr = getLocalDateStr();
+  
+  // Past dates show NO slots
+  if (dateStr < todayStr) {
+    return [];
+  }
+
   const day = getDayOfWeek(dateStr);
   if (day === -1) return [];
 
   const hours = dataService.getOpeningHours();
   const dayConfig = hours[day.toString()] || hours[day];
+  // Tuesdays or closed days show NO slots
   if (!dayConfig || !dayConfig.isOpen) return [];
 
   const slots: TimeSlot[] = [];
   const interval = dataService.getSlotInterval();
+  const isToday = dateStr === todayStr;
+  const currentMins = getLocalTimeMins();
 
   const parseTimeToMins = (timeStr: string) => {
     if (!timeStr) return 0;
@@ -54,6 +66,10 @@ export const getAvailableTimeSlotsShared = (dateStr: string): TimeSlot[] => {
     const endLimitMins = endMins - buffer;
 
     for (let m = startMins; m <= endLimitMins; m += interval) {
+      // For today, only show slots that are strictly in the FUTURE relative to real current time
+      if (isToday && m <= currentMins) {
+        continue;
+      }
       slots.push(minsToSlot(m, '(Lunch)'));
     }
   }
@@ -66,6 +82,10 @@ export const getAvailableTimeSlotsShared = (dateStr: string): TimeSlot[] => {
     const endLimitMins = endMins - buffer;
 
     for (let m = startMins; m <= endLimitMins; m += interval) {
+      // For today, only show slots that are strictly in the FUTURE relative to real current time
+      if (isToday && m <= currentMins) {
+        continue;
+      }
       slots.push(minsToSlot(m, '(Dinner)'));
     }
   }

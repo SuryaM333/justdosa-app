@@ -130,3 +130,21 @@ export function safeFormatValidUntil(val: any, fallback = ''): string {
     return fallback;
   }
 }
+
+/**
+ * Returns YYYY-MM-DD formatted date string in real local device time.
+ */
+export function getLocalDateStr(dateObj: Date = new Date()): string {
+  const y = dateObj.getFullYear();
+  const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const d = String(dateObj.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * Returns current minutes from midnight in real local device time.
+ */
+export function getLocalTimeMins(dateObj: Date = new Date()): number {
+  return dateObj.getHours() * 60 + dateObj.getMinutes();
+}
+

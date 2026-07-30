@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Booking, Customer } from '../../types';
 import { dataService } from '../../services/dataService';
 import { formatPartyBreakdown } from '../../utils/bookingUtils';
+import { getLocalDateStr } from '../../utils/dateUtils';
 
 interface BookedTabProps {
   bookings: Booking[];
@@ -16,13 +17,7 @@ export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRef
   const [dateFilter, setDateFilter] = React.useState<'upcoming' | 'today' | 'all'>('upcoming');
   const isOnline = dataService.isOnline();
 
-  const getTodayStr = () => {
-    const d = new Date();
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
+  const getTodayStr = () => getLocalDateStr();
 
   const remoteBookings = React.useMemo(() => {
     const today = getTodayStr();
@@ -134,8 +129,7 @@ export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRef
 
   const isToday = (dateStr?: string) => {
     if (!dateStr) return false;
-    const today = new Date().toISOString().split('T')[0];
-    return dateStr === today;
+    return dateStr === getLocalDateStr();
   };
 
   const getDayOfWeek = (dateStr?: string) => {
@@ -203,9 +197,10 @@ export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRef
     note: string;
   } | null>(null);
 
+  const todayStr = getLocalDateStr();
   const kalyanaDates = Array.from(new Set(
     bookings
-      .filter((b) => b.isKalyanaVirundhu)
+      .filter((b) => b.isKalyanaVirundhu && b.bookingDate && b.bookingDate >= todayStr)
       .map((b) => b.bookingDate)
       .filter(Boolean) as string[]
   )).sort();
@@ -216,7 +211,7 @@ export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRef
     const day = d.getDay();
     const diff = (6 - day + 7) % 7;
     const nextSat = new Date(d.getTime() + diff * 86400000);
-    displayDates.push(nextSat.toISOString().split('T')[0]);
+    displayDates.push(getLocalDateStr(nextSat));
   }
 
   return (

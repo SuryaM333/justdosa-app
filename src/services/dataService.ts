@@ -1,7 +1,7 @@
 import { Booking, Customer, DailyStats, Table, LandmarkPosition } from '../types';
 import { smsService } from './smsService';
 import { cleanPhoneNumber, formatAusMobile } from '../utils/phone';
-import { parseToDate } from '../utils/dateUtils';
+import { parseToDate, getLocalDateStr, getLocalTimeMins } from '../utils/dateUtils';
 
 export interface CustomerSuggestion {
   phone: string;
@@ -976,9 +976,10 @@ export const dataService = {
   },
 
   getKalyanaLiveAvailability(selectedDate?: string): KalyanaSlotLiveInfo[] {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateStr();
     const targetDate = selectedDate || today;
     const isToday = targetDate === today;
+    const isPast = targetDate < today;
 
     const slots = this.getKalyanaSlots();
     const activeTables = this.getTables().filter(t => !t.isInactive);
@@ -986,8 +987,7 @@ export const dataService = {
     const totalSeatsCount = activeTables.reduce((acc, t) => acc + (t.capacity || 0), 0);
 
     const cutoffMins = this.getKalyanaCutoffMinutes();
-    const now = new Date();
-    const currentMins = now.getHours() * 60 + now.getMinutes();
+    const currentMins = getLocalTimeMins();
 
     const dateBookings = cachedBookings.filter(b => 
       b.bookingDate === targetDate && 
@@ -1012,7 +1012,7 @@ export const dataService = {
       const cutoffM = Math.max(0, cutoffInMins) % 60;
       const cutoffTimeStr = `${cutoffH.toString().padStart(2, '0')}:${cutoffM.toString().padStart(2, '0')}`;
 
-      const isClosed = isToday && (currentMins >= cutoffInMins);
+      const isClosed = isPast || (isToday && currentMins >= cutoffInMins);
 
       const slotBookings = dateBookings.filter(b => 
         (b.isKalyanaVirundhu || b.kalyanaSlot) && 
@@ -2017,7 +2017,7 @@ export const dataService = {
 
   async autoFinishPreviousDaySeatedParties(): Promise<number> {
     try {
-      const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+      const todayStr = getLocalDateStr();
       const nowMs = Date.now();
       let count = 0;
 
@@ -2047,6 +2047,24 @@ export const dataService = {
           count++;
         }
       }
+
+      // Expire past unseated remote/waitlist bookings from previous days
+      const staleBookings = cachedBookings.filter(b => 
+        ['pending', 'booked', 'confirmed', 'alternative_proposed'].includes(b.status) &&
+        b.bookingDate &&
+        b.bookingDate < todayStr
+      );
+
+      for (const booking of staleBookings) {
+        console.log(`Auto-expiring stale past booking ${booking.id} (${booking.bookingDate})`);
+        const bookingDocRef = doc(db, 'bookings', booking.id);
+        await safeSetDoc(bookingDocRef, {
+          status: 'expired',
+          isNewAlert: false
+        }, { merge: true });
+        count++;
+      }
+
       if (count > 0) {
         await this.updateAllWaitingEstimates();
       }

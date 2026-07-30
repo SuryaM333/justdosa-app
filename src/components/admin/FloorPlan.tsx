@@ -23,6 +23,7 @@ interface FloorPlanProps {
   selectedWaitingBooking: Booking | null;
   onSelectWaitingBooking: (booking: Booking | null) => void;
   onTableUpdated: () => void;
+  adminRole?: 'staff' | 'owner';
 }
 
 export const FloorPlan: React.FC<FloorPlanProps> = ({
@@ -31,8 +32,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   selectedWaitingBooking,
   onSelectWaitingBooking,
   onTableUpdated,
+  adminRole = 'owner',
 }) => {
+  const isOwner = adminRole === 'owner';
   const canvasRef = useRef<HTMLDivElement>(null);
+
   
   // State
   const [overrideConfirmModal, setOverrideConfirmModal] = useState<{ table: Table; booking: Booking } | null>(null);
@@ -498,24 +502,26 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
         {/* Action Controls */}
         <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            type="button"
-            onClick={() => {
-              setIsEditMode(!isEditMode);
-              if (mergeMode) {
-                setMergeMode(false);
-                setMergeFirstTableId(null);
-              }
-            }}
-            className={`py-2 px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm border ${
-              isEditMode
-                ? 'bg-[#E37A08] hover:bg-[#c96906] text-white border-transparent ring-2 ring-[#E37A08]/50 shadow-md'
-                : 'bg-[#F5F2EA] dark:bg-[#1C1917] hover:bg-[#E8E2D2] dark:hover:bg-[#26221E] text-[#8B4513] dark:text-[#D2B48C] border-[#E8E2D2] dark:border-[#3D352E]'
-            }`}
-          >
-            <Edit2 className="w-3.5 h-3.5" />
-            <span>{isEditMode ? 'Done Editing' : '✏️ Edit Floor Plan'}</span>
-          </button>
+          {isOwner && (
+            <button
+              type="button"
+              onClick={() => {
+                setIsEditMode(!isEditMode);
+                if (mergeMode) {
+                  setMergeMode(false);
+                  setMergeFirstTableId(null);
+                }
+              }}
+              className={`py-2 px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm border ${
+                isEditMode
+                  ? 'bg-[#E37A08] hover:bg-[#c96906] text-white border-transparent ring-2 ring-[#E37A08]/50 shadow-md'
+                  : 'bg-[#F5F2EA] dark:bg-[#1C1917] hover:bg-[#E8E2D2] dark:hover:bg-[#26221E] text-[#8B4513] dark:text-[#D2B48C] border-[#E8E2D2] dark:border-[#3D352E]'
+              }`}
+            >
+              <Edit2 className="w-3.5 h-3.5" />
+              <span>{isEditMode ? 'Done Editing' : '✏️ Edit Floor Plan'}</span>
+            </button>
+          )}
 
           {!isEditMode && (
             <button
