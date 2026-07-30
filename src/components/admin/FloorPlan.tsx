@@ -1,7 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Users, CheckCircle2, AlertTriangle, Ban, Clock, X, Check, Plus, UserCheck, DoorOpen, Bath, UtensilsCrossed, Store, Baby, GitMerge, GripVertical, Move, Edit2, Save } from 'lucide-react';
-import { Table, Booking, LandmarkPosition } from '../../types';
+import { 
+  Users, CheckCircle2, AlertTriangle, Ban, Clock, X, Check, Plus, UserCheck, 
+  DoorOpen, Bath, UtensilsCrossed, Store, Baby, GitMerge, GripVertical, Move, 
+  Edit2, Save, Grid, Maximize2, Trash2, RotateCw, Wine, CreditCard, Armchair,
+  CheckCircle, Sliders, LayoutGrid
+} from 'lucide-react';
+import { Table, Booking, LandmarkPosition, FloorCanvasSettings } from '../../types';
 import { dataService } from '../../services/dataService';
 import { getRequiredTableSeats, formatPartyBreakdownShort } from '../../utils/bookingUtils';
 import { parseToDate, safeGetElapsedMs } from '../../utils/dateUtils';
@@ -27,6 +32,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   onSelectWaitingBooking,
   onTableUpdated,
 }) => {
+  const canvasRef = useRef<HTMLDivElement>(null);
+  
+  // State
   const [overrideConfirmModal, setOverrideConfirmModal] = useState<{ table: Table; booking: Booking } | null>(null);
   const [errorToast, setErrorToast] = useState<string | null>(null);
   const [selectedOccupiedTable, setSelectedOccupiedTable] = useState<Table | null>(null);
@@ -37,37 +45,93 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [quickSeatServer, setQuickSeatServer] = useState('');
   const [mergeMode, setMergeMode] = useState(false);
   const [mergeFirstTableId, setMergeFirstTableId] = useState<number | null>(null);
+  
+  // Edit Mode & Canvas State
   const [isEditMode, setIsEditMode] = useState(false);
-  const [draggedItem, setDraggedItem] = useState<{ kind: 'table' | 'landmark'; id: number | string } | null>(null);
-  const [dragOverCol, setDragOverCol] = useState<'top' | 'left' | 'middle' | 'right' | null>(null);
+  const [selectedNode, setSelectedNode] = useState<{ kind: 'table' | 'landmark'; id: number | string } | null>(null);
   const [layoutToast, setLayoutToast] = useState<string | null>(null);
+  const [isAddLandmarkOpen, setIsAddLandmarkOpen] = useState(false);
+  const [customLandmarkName, setCustomLandmarkName] = useState('');
+  const [customLandmarkType, setCustomLandmarkType] = useState<'door' | 'washroom' | 'kitchen' | 'counter' | 'bar' | 'pos' | 'waiting' | 'custom'>('bar');
 
-  const getTableDefaultPosition = (id: number) => {
-    switch (id) {
-      case 1: return { column: 'right' as const, order: 3 };
-      case 2: return { column: 'right' as const, order: 2 };
-      case 3: return { column: 'right' as const, order: 1 };
-      case 4: return { column: 'top' as const, order: 1 };
-      case 5: return { column: 'middle' as const, order: 1, isDiamond: true };
-      case 6: return { column: 'middle' as const, order: 2, isDiamond: true };
-      case 7: return { column: 'middle' as const, order: 3, isDiamond: true };
-      case 8: return { column: 'left' as const, order: 3 };
-      case 9: return { column: 'left' as const, order: 2 };
-      case 10: return { column: 'left' as const, order: 1 };
-      default: return { column: 'right' as const, order: 1 };
+  // Canvas settings
+  const [canvasSettings, setCanvasSettings] = useState<FloorCanvasSettings>(() => {
+    const s = dataService.getSettings();
+    return s?.floorCanvasSettings || {
+      aspectRatio: '16:9',
+      widthMeters: 14,
+      heightMeters: 9,
+      gridSnapEnabled: true,
+      gridSizePercent: 2.5
+    };
+  });
+
+  // Active interaction refs for smooth 60fps canvas dragging & resizing
+  const activeDragRef = useRef<{
+    kind: 'table' | 'landmark';
+    id: number | string;
+    startMouseX: number;
+    startMouseY: number;
+    startNodeX: number;
+    startNodeY: number;
+    nodeWidth: number;
+    nodeHeight: number;
+  } | null>(null);
+
+  const activeResizeRef = useRef<{
+    kind: 'table' | 'landmark';
+    id: number | string;
+    startMouseX: number;
+    startMouseY: number;
+    startWidth: number;
+    startHeight: number;
+  } | null>(null);
+
+  // Fallback coordinate normalizer for tables
+  const getTableCoords = (table: Table) => {
+    let x = table.x;
+    let y = table.y;
+    let width = table.width || 18;
+    let height = table.height || 18;
+    let shape = table.shape || (table.position?.isDiamond || [5, 6, 7].includes(table.id) ? 'diamond' : 'rectangle');
+
+    if (x === undefined || y === undefined) {
+      if (table.position?.column === 'top') {
+        x = 40; y = 6; width = 22; height = 16;
+      } else if (table.position?.column === 'left') {
+        x = 6;
+        y = table.position.order === 1 ? 10 : table.position.order === 2 ? 35 : 60;
+      } else if (table.position?.column === 'middle') {
+        x = 43;
+        y = table.position.order === 1 ? 28 : table.position.order === 2 ? 46 : 64;
+        width = 15; height = 15; shape = 'diamond';
+      } else if (table.position?.column === 'right') {
+        x = 76;
+        y = table.position.order === 1 ? 10 : table.position.order === 2 ? 35 : 60;
+      } else {
+        x = 10 + (table.id % 4) * 20;
+        y = 10 + Math.floor(table.id / 4) * 20;
+      }
     }
+    return { x: Math.max(0, Math.min(x, 100 - width)), y: Math.max(0, Math.min(y, 100 - height)), width, height, shape };
   };
 
-  const areTablesAdjacent = (t1: Table, t2: Table): boolean => {
-    const p1 = t1.position || getTableDefaultPosition(t1.id);
-    const p2 = t2.position || getTableDefaultPosition(t2.id);
-    if (p1 && p2 && p1.column === p2.column && Math.abs(p1.order - p2.order) === 1) {
-      return true;
+  // Fallback coordinate normalizer for landmarks
+  const getLandmarkCoords = (lm: LandmarkPosition) => {
+    let x = lm.x;
+    let y = lm.y;
+    let width = lm.width || 18;
+    let height = lm.height || 10;
+    let type = lm.type || (lm.id as any) || 'custom';
+
+    if (x === undefined || y === undefined) {
+      if (lm.id === 'door') { x = 5; y = 85; width = 18; height = 10; }
+      else if (lm.id === 'washroom') { x = 28; y = 85; width = 18; height = 10; }
+      else if (lm.id === 'kitchen') { x = 52; y = 85; width = 20; height = 10; }
+      else if (lm.id === 'counter') { x = 76; y = 85; width = 20; height = 10; }
+      else { x = 15; y = 85; width = 18; height = 10; }
     }
-    if (Math.abs(t1.id - t2.id) === 1) {
-      return true;
-    }
-    return false;
+    return { x: Math.max(0, Math.min(x, 100 - width)), y: Math.max(0, Math.min(y, 100 - height)), width, height, type };
   };
 
   const getTableBooking = (table: Table): Booking | undefined => {
@@ -89,13 +153,10 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     const candidates = tables.filter((t) => !t.isOccupied && !t.isInactive && requiredSeats <= t.maxOverrideCapacity);
     if (candidates.length === 0) return null;
 
-    // For parties of 1-2 (required seats <= 2)
     if (requiredSeats <= 2) {
-      // Prefer the 2-seaters (T5, T6, T7) but always try to leave at least ONE of them vacant
       const activeTwoSeaters = tables.filter(t => [5, 6, 7].includes(t.id));
       const occupiedCount = activeTwoSeaters.filter(t => t.isOccupied || t.isInactive).length;
 
-      // "if two of the three are already occupied, suggest a 6-seater for the next couple instead."
       if (occupiedCount >= 2) {
         const vacantSixSeaters = candidates.filter(t => t.capacity === 6);
         if (vacantSixSeaters.length > 0) {
@@ -104,7 +165,6 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         }
       }
 
-      // Otherwise, suggest the preferred vacant 2-seaters
       const vacantTwoSeaters = candidates.filter(t => [5, 6, 7].includes(t.id));
       if (vacantTwoSeaters.length > 0) {
         vacantTwoSeaters.sort((a, b) => a.id - b.id);
@@ -112,7 +172,6 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       }
     }
 
-    // Default: Sort by smallest capacity first, then by table id
     candidates.sort((a, b) => {
       if (a.capacity !== b.capacity) return a.capacity - b.capacity;
       return a.id - b.id;
@@ -123,6 +182,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
   const bestFitTable = getBestFitTable();
 
+  // Handle table seating/merging/allocation click in operational view
   const handleTableClick = async (table: Table) => {
     if (isEditMode) return;
     setErrorToast(null);
@@ -144,11 +204,6 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         const firstTable = tables.find(t => t.id === mergeFirstTableId);
         if (!firstTable) return;
 
-        if (!areTablesAdjacent(firstTable, table)) {
-          setErrorToast("Tables must be adjacent to merge.");
-          return;
-        }
-
         await dataService.mergeTables(mergeFirstTableId, table.id);
         setMergeFirstTableId(null);
         setMergeMode(false);
@@ -157,20 +212,15 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       return;
     }
 
-    // If table is occupied
     if (table.isOccupied) {
       setSelectedOccupiedTable(table);
       return;
     }
 
-    // If vacant and a waiting customer is selected for allocation
     if (selectedWaitingBooking) {
       const requiredSeats = getRequiredTableSeats(selectedWaitingBooking);
-      // Check capacity
       if (requiredSeats > table.capacity) {
-        // Can we override on tables 5, 6, and 7?
         if ((table.id === 5 || table.id === 6 || table.id === 7) && requiredSeats <= table.maxOverrideCapacity) {
-          // Open override confirm dialog
           setOverrideConfirmModal({ table, booking: selectedWaitingBooking });
           return;
         } else {
@@ -179,7 +229,6 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         }
       }
 
-      // Perform allocation
       const res = await dataService.allocateTable(selectedWaitingBooking.id, table.id);
       if (res.success) {
         onSelectWaitingBooking(null);
@@ -199,239 +248,256 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const handleQuickSeatSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!quickSeatModal) return;
-    const res = await dataService.seatWalkInDirectly(
-      quickSeatModal.id,
-      quickSeatPartySize,
-      quickSeatName.trim() || 'Walk-In',
-      quickSeatPhone.trim() || '0400 000 000'
-    );
+
+    const res = await dataService.addQuickWalkinAndSeat({
+      tableId: quickSeatModal.id,
+      partySize: quickSeatPartySize,
+      name: quickSeatName,
+      phone: quickSeatPhone,
+      serverName: quickSeatServer,
+    });
+
     if (res.success) {
-      await dataService.assignServerToTable(quickSeatModal.id, quickSeatServer || null);
       setQuickSeatModal(null);
       onTableUpdated();
     } else {
-      setErrorToast(res.error || 'Failed to seat walk-in');
+      setErrorToast(res.error || 'Quick seat failed.');
     }
   };
 
-  const confirmOverrideAllocation = async () => {
-    if (!overrideConfirmModal) return;
-    const { table, booking } = overrideConfirmModal;
-    const res = await dataService.allocateTable(booking.id, table.id);
-    if (res.success) {
-      setOverrideConfirmModal(null);
-      onSelectWaitingBooking(null);
-      onTableUpdated();
-    } else {
-      setErrorToast(res.error || 'Override allocation failed.');
-      setOverrideConfirmModal(null);
+  // Canvas Drag & Resize Pointer Events
+  const handlePointerDownDrag = (
+    e: React.PointerEvent,
+    kind: 'table' | 'landmark',
+    id: number | string,
+    currentX: number,
+    currentY: number,
+    width: number,
+    height: number
+  ) => {
+    if (!isEditMode) return;
+    e.stopPropagation();
+    setSelectedNode({ kind, id });
+
+    activeDragRef.current = {
+      kind,
+      id,
+      startMouseX: e.clientX,
+      startMouseY: e.clientY,
+      startNodeX: currentX,
+      startNodeY: currentY,
+      nodeWidth: width,
+      nodeHeight: height,
+    };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerDownResize = (
+    e: React.PointerEvent,
+    kind: 'table' | 'landmark',
+    id: number | string,
+    currentWidth: number,
+    currentHeight: number
+  ) => {
+    if (!isEditMode) return;
+    e.stopPropagation();
+    setSelectedNode({ kind, id });
+
+    activeResizeRef.current = {
+      kind,
+      id,
+      startMouseX: e.clientX,
+      startMouseY: e.clientY,
+      startWidth: currentWidth,
+      startHeight: currentHeight,
+    };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMoveCanvas = (e: React.PointerEvent) => {
+    if (!isEditMode || !canvasRef.current) return;
+    const canvasRect = canvasRef.current.getBoundingClientRect();
+    if (!canvasRect.width || !canvasRect.height) return;
+
+    const snapStep = canvasSettings.gridSnapEnabled ? (canvasSettings.gridSizePercent || 2.5) : 0.5;
+
+    // Handle Active Drag
+    if (activeDragRef.current) {
+      const drag = activeDragRef.current;
+      const dxPercent = ((e.clientX - drag.startMouseX) / canvasRect.width) * 100;
+      const dyPercent = ((e.clientY - drag.startMouseY) / canvasRect.height) * 100;
+
+      let rawX = drag.startNodeX + dxPercent;
+      let rawY = drag.startNodeY + dyPercent;
+
+      let clampedX = Math.max(0, Math.min(rawX, 100 - drag.nodeWidth));
+      let clampedY = Math.max(0, Math.min(rawY, 100 - drag.nodeHeight));
+
+      let snappedX = Math.round(clampedX / snapStep) * snapStep;
+      let snappedY = Math.round(clampedY / snapStep) * snapStep;
+
+      if (drag.kind === 'table') {
+        const tId = Number(drag.id);
+        const currentTables = dataService.getTables();
+        const updated = currentTables.map(t => {
+          if (t.id === tId) {
+            return { ...t, x: snappedX, y: snappedY };
+          }
+          return t;
+        });
+        dataService.saveTables(updated).catch(() => {});
+        onTableUpdated();
+      } else {
+        const lmId = String(drag.id);
+        const currentLandmarks = dataService.getLandmarks();
+        const updated = currentLandmarks.map(lm => {
+          if (lm.id === lmId) {
+            return { ...lm, x: snappedX, y: snappedY };
+          }
+          return lm;
+        });
+        dataService.setLandmarks(updated).catch(() => {});
+        onTableUpdated();
+      }
+    }
+
+    // Handle Active Resize
+    if (activeResizeRef.current) {
+      const resize = activeResizeRef.current;
+      const dxPercent = ((e.clientX - resize.startMouseX) / canvasRect.width) * 100;
+      const dyPercent = ((e.clientY - resize.startMouseY) / canvasRect.height) * 100;
+
+      let rawW = resize.startWidth + dxPercent;
+      let rawH = resize.startHeight + dyPercent;
+
+      let clampedW = Math.max(8, Math.min(rawW, 45));
+      let clampedH = Math.max(8, Math.min(rawH, 45));
+
+      let snappedW = Math.round(clampedW / snapStep) * snapStep;
+      let snappedH = Math.round(clampedH / snapStep) * snapStep;
+
+      if (resize.kind === 'table') {
+        const tId = Number(resize.id);
+        const currentTables = dataService.getTables();
+        const updated = currentTables.map(t => {
+          if (t.id === tId) {
+            return { ...t, width: snappedW, height: snappedH };
+          }
+          return t;
+        });
+        dataService.saveTables(updated).catch(() => {});
+        onTableUpdated();
+      } else {
+        const lmId = String(resize.id);
+        const currentLandmarks = dataService.getLandmarks();
+        const updated = currentLandmarks.map(lm => {
+          if (lm.id === lmId) {
+            return { ...lm, width: snappedW, height: snappedH };
+          }
+          return lm;
+        });
+        dataService.setLandmarks(updated).catch(() => {});
+        onTableUpdated();
+      }
     }
   };
 
-  const handleFinishParty = (tableId: number) => {
-    dataService.finishSeatedParty(tableId);
-    setSelectedOccupiedTable(null);
+  const handlePointerUpCanvas = () => {
+    if (activeDragRef.current || activeResizeRef.current) {
+      activeDragRef.current = null;
+      activeResizeRef.current = null;
+      setLayoutToast('Floor plan layout saved ✓');
+      setTimeout(() => setLayoutToast(null), 2000);
+    }
+  };
+
+  // Add custom landmark
+  const handleAddLandmark = async () => {
+    const name = customLandmarkName.trim() || 'Custom Landmark';
+    const newLm: LandmarkPosition = {
+      id: `lm_${Date.now()}`,
+      name,
+      type: customLandmarkType,
+      x: 40,
+      y: 40,
+      width: 18,
+      height: 10,
+    };
+    const current = dataService.getLandmarks();
+    await dataService.setLandmarks([...current, newLm]);
+    setCustomLandmarkName('');
+    setIsAddLandmarkOpen(false);
+    setLayoutToast(`Added ${name}`);
+    setTimeout(() => setLayoutToast(null), 2000);
     onTableUpdated();
   };
 
-  // Helper to render table box
-  const renderTableNode = (tableId: number) => {
-    let table = tables.find((t) => t.id === tableId);
-    if (!table) {
-      table = {
-        id: tableId,
-        name: `Table ${tableId}`,
-        capacity: (tableId === 5 || tableId === 6 || tableId === 7) ? 2 : 6,
-        maxOverrideCapacity: (tableId === 5 || tableId === 6 || tableId === 7) ? 3 : 6,
-        isOccupied: false,
-        isInactive: false,
-        position: getTableDefaultPosition(tableId),
-      };
+  // Delete custom landmark
+  const handleDeleteLandmark = async (id: string) => {
+    const current = dataService.getLandmarks();
+    const updated = current.filter(lm => lm.id !== id);
+    await dataService.setLandmarks(updated);
+    setSelectedNode(null);
+    setLayoutToast('Landmark removed ✓');
+    setTimeout(() => setLayoutToast(null), 2000);
+    onTableUpdated();
+  };
+
+  // Save Canvas Settings
+  const updateCanvasSettings = async (updates: Partial<FloorCanvasSettings>) => {
+    const next = { ...canvasSettings, ...updates };
+    setCanvasSettings(next);
+    await dataService.updateSettings({ floorCanvasSettings: next });
+    setLayoutToast('Floor dimensions saved ✓');
+    setTimeout(() => setLayoutToast(null), 2000);
+  };
+
+  const landmarks = dataService.getLandmarks();
+
+  // Aspect ratio Tailwind mapping
+  const getAspectRatioClass = () => {
+    switch (canvasSettings.aspectRatio) {
+      case '4:3': return 'aspect-[4/3]';
+      case '1:1': return 'aspect-[1/1]';
+      case '2:1': return 'aspect-[2/1]';
+      case '16:9': default: return 'aspect-[16/9]';
     }
-
-    const booking = getTableBooking(table);
-    const position = table.position || getTableDefaultPosition(table.id);
-    const isDiamond = position?.isDiamond || false;
-    const requiredSeats = selectedWaitingBooking ? getRequiredTableSeats(selectedWaitingBooking) : 0;
-    const isSelectedTarget = selectedWaitingBooking && !table.isOccupied && !table.isInactive && (
-      requiredSeats <= table.capacity || 
-      ((table.id === 5 || table.id === 6 || table.id === 7) && requiredSeats <= table.maxOverrideCapacity)
-    );
-    const isBestFit = bestFitTable?.id === table.id;
-    const firstSelectedTable = mergeFirstTableId ? tables.find(t => t.id === mergeFirstTableId) : null;
-    const isAdjacentToFirst = firstSelectedTable && !table.isOccupied && !table.isInactive && areTablesAdjacent(firstSelectedTable, table);
-    const isFirstSelected = mergeFirstTableId === table.id;
-
-    // Color coding: green = vacant, red = occupied, grey = inactive
-    let bgStyle = 'bg-emerald-500/10 border-emerald-500 text-emerald-800 dark:text-emerald-300 hover:bg-emerald-500/20';
-    let badgeBg = 'bg-emerald-500 text-white';
-    if (table.isInactive) {
-      bgStyle = 'bg-[#E8E2D2] dark:bg-[#1C1917]/80 border-[#6B5E4C] dark:border-[#3D352E] text-[#6B5E4C] dark:text-[#B8ACA0] cursor-not-allowed opacity-60';
-      badgeBg = 'bg-[#6B5E4C] dark:bg-[#3D352E] text-white';
-    } else if (table.isOccupied) {
-      bgStyle = 'bg-rose-500/15 border-rose-500 text-rose-800 dark:text-rose-300 hover:bg-rose-500/25 shadow-sm shadow-rose-500/10';
-      badgeBg = 'bg-rose-500 text-white';
-    } else if (isFirstSelected) {
-      bgStyle = 'bg-amber-500/20 border-amber-500 text-amber-800 dark:text-amber-300 ring-4 ring-amber-500 hover:bg-amber-500/30 shadow-lg shadow-amber-500/40 animate-pulse border-2';
-      badgeBg = 'bg-amber-500 text-white';
-    } else if (isAdjacentToFirst) {
-      bgStyle = 'bg-orange-500/20 border-orange-500 text-orange-800 dark:text-orange-300 ring-4 ring-orange-500/50 hover:bg-orange-500/30 shadow-lg shadow-orange-500/40 animate-pulse border-2';
-      badgeBg = 'bg-orange-500 text-white';
-    } else if (isBestFit) {
-      bgStyle = 'bg-[#E37A08]/30 border-[#E37A08] text-[#8B4513] dark:text-[#D2B48C] hover:bg-[#E37A08]/40 ring-4 ring-[#E37A08] animate-pulse border-2 shadow-lg shadow-[#E37A08]/30';
-      badgeBg = 'bg-[#E37A08] text-white';
-    } else if (isSelectedTarget) {
-      bgStyle = 'bg-[#E37A08]/15 border-[#E37A08]/70 text-[#8B4513] dark:text-[#D2B48C] hover:bg-[#E37A08]/25 ring-2 ring-[#E37A08]/30 animate-pulse';
-      badgeBg = 'bg-[#E37A08] text-white';
-    }
-
-    // For diamond layout, we apply rotate transformation on outer box and inverse on inner content
-    return (
-      <motion.div
-        key={table.id}
-        draggable={isEditMode}
-        onDragStart={(e) => {
-          if (!isEditMode) return;
-          e.dataTransfer.setData('text/plain', JSON.stringify({ kind: 'table', id: table.id }));
-          setDraggedItem({ kind: 'table', id: table.id });
-        }}
-        onDragEnd={() => {
-          setDraggedItem(null);
-          setDragOverCol(null);
-        }}
-        whileHover={!table.isInactive && !isEditMode ? { scale: 1.03 } : {}}
-        whileTap={!table.isInactive && !isEditMode ? { scale: 0.97 } : {}}
-        onClick={() => handleTableClick(table)}
-        className={`relative transition-all flex items-center justify-center select-none ${
-          isEditMode ? 'cursor-grab active:cursor-grabbing ring-2 ring-[#E37A08] shadow-lg' : 'cursor-pointer'
-        } ${
-          isDiamond 
-            ? 'w-24 h-24 sm:w-28 sm:h-28 my-4 mx-auto rotate-45 rounded-2xl border-2 shadow-md' 
-            : table.id === 4 
-            ? 'w-48 sm:w-64 h-24 rounded-2xl border-2 shadow-md mx-auto' 
-            : 'w-28 sm:w-36 h-40 rounded-2xl border-2 shadow-md mx-auto'
-        } ${bgStyle}`}
-      >
-        {isEditMode && (
-          <div className={`absolute top-1 left-1 bg-[#E37A08] text-white p-1 rounded-md shadow-md z-30 ${isDiamond ? '-rotate-45' : ''}`}>
-            <GripVertical className="w-3.5 h-3.5" />
-          </div>
-        )}
-        {isBestFit && (
-          <div className={`absolute -top-3 left-1/2 -translate-x-1/2 bg-[#E37A08] text-white text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider shadow-md whitespace-nowrap z-20 flex items-center gap-1 ${isDiamond ? '-rotate-45' : ''}`}>
-            <span>★ Best Fit</span>
-          </div>
-        )}
-        <div className={`flex flex-col items-center justify-center text-center p-2 ${isDiamond ? '-rotate-45' : ''}`}>
-          {/* Table Number Badge */}
-          <div className="flex flex-col items-center gap-0.5 mb-1.5">
-            <div className={`text-xs font-bold px-2 py-0.5 rounded-full shadow-sm flex items-center gap-1 ${badgeBg}`}>
-              <span>{table.name}</span>
-            </div>
-            {getCleanMergedWith(table.mergedWith) && (
-              <span className="text-[9px] font-black tracking-wider uppercase bg-blue-500 text-white px-1.5 py-0.5 rounded border border-blue-600 shadow-xs mt-0.5 whitespace-nowrap">
-                🔗 + Table {getCleanMergedWith(table.mergedWith)}
-              </span>
-            )}
-            {table.assignedServer && (
-              <span className="text-[9px] font-bold tracking-wider uppercase bg-white/70 dark:bg-[#1C1917]/70 text-amber-800 dark:text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/20 shadow-xs mt-0.5 whitespace-nowrap">
-                👤 {table.assignedServer}
-              </span>
-            )}
-          </div>
-
-          {/* Status / Content */}
-          {table.isInactive ? (
-            <div className="flex flex-col items-center">
-              <Ban className="w-4 h-4 mb-0.5 text-[#6B5E4C]" />
-              <span className="text-[10px] uppercase font-bold tracking-wider">INACTIVE</span>
-            </div>
-          ) : table.isOccupied ? (
-            <div className="flex flex-col items-center">
-              <span className="font-bold text-xs sm:text-sm truncate max-w-[80px] text-[#2D2926] dark:text-white">
-                {booking ? `${booking.firstName}` : 'Occupied'}
-              </span>
-              <div className="flex flex-col items-center gap-0.5 mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-400">
-                <div className="flex items-center gap-1">
-                  <Users className="w-3 h-3" />
-                  <span>{booking ? formatPartyBreakdownShort(booking) : ''}</span>
-                </div>
-                {booking && ((booking.childrenHighChairs?.filter(Boolean).length ?? booking.childSeats) > 0) && (
-                  <div className="flex items-center gap-0.5 bg-rose-500/20 text-rose-700 dark:text-rose-300 px-1.5 py-0.5 rounded text-[9px] font-bold border border-rose-500/30" title="High Chair Needed">
-                    <Baby className="w-3 h-3" />
-                    <span>High Chair</span>
-                  </div>
-                )}
-                {(() => {
-                  const elapsedMs = booking ? safeGetElapsedMs(booking.seatedAt) : 0;
-                  const elapsedMins = Math.floor(elapsedMs / 60000);
-                  const isTimeUp = elapsedMins >= 60;
-                  const isAmber = elapsedMins >= 45 && elapsedMins < 60;
-                  const durText = booking ? getSeatedDuration(booking.seatedAt) : '30m';
-
-                  return (
-                    <div className={`flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded font-mono font-bold mt-0.5 ${
-                      isTimeUp
-                        ? 'bg-rose-600 text-white animate-pulse'
-                        : isAmber
-                        ? 'bg-amber-500 text-white'
-                        : 'text-[#6B5E4C] dark:text-[#B8ACA0]'
-                    }`}>
-                      <Clock className="w-2.5 h-2.5 shrink-0" />
-                      <span>{durText}</span>
-                      {isTimeUp && <span className="uppercase text-[8px] font-black">• Time up</span>}
-                    </div>
-                  );
-                })()}
-              </div>
-              <span className="text-[9px] uppercase font-bold text-rose-500 mt-1 bg-white/60 dark:bg-[#1C1917]/80 px-1.5 py-0.5 rounded border border-rose-300 dark:border-rose-800">
-                Tap to Free
-              </span>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center">
-              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase">
-                {isSelectedTarget ? (isBestFit ? 'Best Fit!' : 'Tap to Seat!') : 'Vacant'}
-              </span>
-              <div className="flex items-center gap-1 text-[10px] text-[#6B5E4C] dark:text-[#B8ACA0] mt-0.5 font-medium">
-                <Users className="w-3 h-3" />
-                <span>
-                  Cap: {getCleanMergedWith(table.mergedWith) ? table.capacity + (tables.find(t => t.id === Number(getCleanMergedWith(table.mergedWith)))?.capacity || 0) : table.capacity}
-                  {!getCleanMergedWith(table.mergedWith) && table.maxOverrideCapacity > table.capacity ? ' (+1)' : ''}
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
-      </motion.div>
-    );
   };
 
   return (
-    <div className="bg-white dark:bg-[#26221E] rounded-3xl p-4 sm:p-6 shadow-xl border border-[#E8E2D2] dark:border-[#3D352E] relative">
-      {/* Floor Plan Header & Legend */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 mb-6 border-b border-[#E8E2D2] dark:border-[#3D352E]">
+    <div className="bg-white dark:bg-[#26221E] rounded-3xl p-4 sm:p-6 shadow-xl border border-[#E8E2D2] dark:border-[#3D352E] relative select-none">
+      {/* Floor Plan Header & Mode Bar */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 mb-4 border-b border-[#E8E2D2] dark:border-[#3D352E]">
         <div>
           <h2 className="text-lg font-serif font-bold text-[#2D2926] dark:text-white flex items-center gap-2">
-            <span>Restaurant Floor Plan</span>
+            <span>Restaurant Free-Canvas Floor Plan</span>
             <span className="text-xs font-normal px-2.5 py-0.5 rounded-full bg-[#F5F2EA] dark:bg-[#1C1917] text-[#6B5E4C] dark:text-[#B8ACA0] border border-[#E8E2D2] dark:border-[#3D352E]">
-              10 Active
+              {tables.filter(t => !t.isInactive).length} Active Tables
             </span>
+            {layoutToast && (
+              <span className="text-xs font-bold px-3 py-0.5 rounded-full bg-emerald-500 text-white animate-fade-in shadow-xs flex items-center gap-1">
+                <CheckCircle className="w-3.5 h-3.5" /> {layoutToast}
+              </span>
+            )}
           </h2>
           <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0] mt-0.5">
-            {selectedWaitingBooking ? (
-              <span className="text-[#E37A08] dark:text-[#D2B48C] font-semibold flex items-center gap-1 animate-pulse">
+            {isEditMode ? (
+              <span className="text-[#E37A08] font-bold">
+                ✏️ EDIT MODE: Drag tables or landmarks anywhere on the floor. Corner handle resizes real dimensions!
+              </span>
+            ) : selectedWaitingBooking ? (
+              <span className="text-[#E37A08] font-semibold flex items-center gap-1 animate-pulse">
                 <UserCheck className="w-4 h-4" />
-                Selecting table for <strong>{selectedWaitingBooking.firstName}</strong> (Party of {selectedWaitingBooking.partySize}). Tap a blinking vacant table!
+                Selecting table for <strong>{selectedWaitingBooking.firstName}</strong> (Party of {selectedWaitingBooking.partySize}). Tap a vacant table!
               </span>
             ) : (
-              'Tap a vacant table to allocate after selecting a waiting customer, or tap an occupied table to finish.'
+              'Tap a vacant table to allocate or quick-seat, or tap an occupied table to finish or view notes.'
             )}
           </p>
         </div>
 
-        {/* Merge, Edit Floor Plan and Legend Controls */}
-        <div className="flex flex-wrap items-center gap-3">
+        {/* Action Controls */}
+        <div className="flex flex-wrap items-center gap-2.5">
           <button
             type="button"
             onClick={() => {
@@ -441,7 +507,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 setMergeFirstTableId(null);
               }
             }}
-            className={`py-2 px-3.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm border ${
+            className={`py-2 px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm border ${
               isEditMode
                 ? 'bg-[#E37A08] hover:bg-[#c96906] text-white border-transparent ring-2 ring-[#E37A08]/50 shadow-md'
                 : 'bg-[#F5F2EA] dark:bg-[#1C1917] hover:bg-[#E8E2D2] dark:hover:bg-[#26221E] text-[#8B4513] dark:text-[#D2B48C] border-[#E8E2D2] dark:border-[#3D352E]'
@@ -451,719 +517,740 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             <span>{isEditMode ? 'Done Editing' : '✏️ Edit Floor Plan'}</span>
           </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              if (isEditMode) setIsEditMode(false);
-              if (mergeMode) {
-                setMergeFirstTableId(null);
-              }
-              setMergeMode(!mergeMode);
-              setErrorToast(null);
-            }}
-            className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm border ${
-              mergeMode
-                ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-amber-500/20 ring-2 ring-amber-500'
-                : 'bg-[#F5F2EA] dark:bg-[#1C1917] hover:bg-[#E8E2D2] dark:hover:bg-[#26221E] text-[#8B4513] dark:text-[#D2B48C] border-[#E8E2D2] dark:border-[#3D352E]'
-            }`}
-            title="Toggle Merge Tables Mode"
-          >
-            <GitMerge className="w-3.5 h-3.5" />
-            <span>{mergeMode ? 'Exit Merge Mode' : 'Merge Tables'}</span>
-          </button>
+          {!isEditMode && (
+            <button
+              type="button"
+              onClick={() => {
+                if (mergeMode) setMergeFirstTableId(null);
+                setMergeMode(!mergeMode);
+                setErrorToast(null);
+              }}
+              className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm border ${
+                mergeMode
+                  ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-amber-500/20 ring-2 ring-amber-500'
+                  : 'bg-[#F5F2EA] dark:bg-[#1C1917] hover:bg-[#E8E2D2] dark:hover:bg-[#26221E] text-[#8B4513] dark:text-[#D2B48C] border-[#E8E2D2] dark:border-[#3D352E]'
+              }`}
+            >
+              <GitMerge className="w-3.5 h-3.5" />
+              <span>{mergeMode ? 'Exit Merge' : 'Merge Tables'}</span>
+            </button>
+          )}
 
-          {/* Legend */}
-          <div className="flex items-center gap-3 text-xs font-medium">
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-md bg-emerald-500" />
-              <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Vacant</span>
+          {/* Operational Legend */}
+          {!isEditMode && (
+            <div className="hidden sm:flex items-center gap-3 text-xs font-medium pl-2 border-l border-[#E8E2D2] dark:border-[#3D352E]">
+              <div className="flex items-center gap-1.5">
+                <div className="w-3 h-3 rounded-md bg-emerald-500" />
+                <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Vacant</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-3 h-3 rounded-md bg-[#E37A08]" />
+                <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Occupied</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-3 h-3 rounded-md bg-amber-400 border border-amber-500 ring-2 ring-amber-400/40" />
+                <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Best Fit</span>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-3 h-3 rounded-md bg-rose-500" />
-              <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Occupied</span>
-            </div>
-          </div>
+          )}
         </div>
       </div>
 
-      {/* Edit Mode Guidance Banner */}
-      <AnimatePresence>
-        {isEditMode && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="mb-4 overflow-hidden"
-          >
-            <div className="p-3 bg-[#E37A08]/15 border-2 border-[#E37A08] rounded-2xl text-xs text-[#8B4513] dark:text-[#D2B48C] font-bold flex items-center justify-between shadow-sm">
-              <div className="flex items-center gap-2">
-                <GripVertical className="w-4 h-4 text-[#E37A08] shrink-0" />
-                <span>
-                  ✨ Drag & Drop Edit Mode Active — Drag tables or landmarks directly into any section (Top, Left, Middle, Right) to reposition them on the floor plan.
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsEditMode(false)}
-                className="px-2.5 py-1 bg-[#E37A08] text-white rounded-lg text-[10px] font-bold hover:bg-[#c96906] shrink-0 cursor-pointer"
-              >
-                Done Editing
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Layout Saved Toast */}
-      <AnimatePresence>
-        {layoutToast && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="mb-4 p-3 rounded-xl bg-emerald-500/15 border border-emerald-500 text-emerald-800 dark:text-emerald-300 text-xs font-bold flex items-center justify-between shadow-sm"
-          >
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-              <span>{layoutToast}</span>
-            </div>
-            <button onClick={() => setLayoutToast(null)} className="p-1 hover:bg-emerald-200/50 rounded-lg">
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Merge Mode Guidance Banner */}
-      <AnimatePresence>
-        {mergeMode && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="mb-4 overflow-hidden"
-          >
-            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-xs text-amber-800 dark:text-amber-400 font-medium flex items-center justify-between">
-              <span>
-                {mergeFirstTableId === null
-                  ? '👉 Tap a vacant table to select it as the first table to merge.'
-                  : `🔗 Table Selected. Now tap an adjacent vacant table (pulsing with orange glow) to combine them.`}
+      {/* EDIT MODE CANVAS CONTROLS BAR */}
+      {isEditMode && (
+        <motion.div 
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-4 p-3 rounded-2xl bg-[#F5F2EA] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] flex flex-wrap items-center justify-between gap-3 text-xs"
+        >
+          <div className="flex flex-wrap items-center gap-3">
+            {/* Aspect Ratio Selector */}
+            <div className="flex items-center gap-1.5">
+              <span className="font-bold text-[#6B5E4C] dark:text-[#B8ACA0] flex items-center gap-1">
+                <LayoutGrid className="w-3.5 h-3.5" /> Room Shape:
               </span>
-              <button
-                type="button"
-                onClick={() => {
-                  setMergeFirstTableId(null);
-                  setMergeMode(false);
-                }}
-                className="text-[10px] underline font-bold"
+              <select
+                value={canvasSettings.aspectRatio}
+                onChange={(e) => updateCanvasSettings({ aspectRatio: e.target.value as any })}
+                className="px-2.5 py-1 rounded-lg bg-white dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] font-bold text-[#2D2926] dark:text-white"
               >
-                Cancel
-              </button>
+                <option value="16:9">16:9 Wide Room</option>
+                <option value="4:3">4:3 Standard</option>
+                <option value="1:1">1:1 Square Room</option>
+                <option value="2:1">2:1 Deep Hall</option>
+              </select>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
-      {/* Error Toast if allocation fails */}
-      <AnimatePresence>
-        {errorToast && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="mb-6 p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-300 text-xs flex items-center justify-between shadow-sm"
-          >
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-              <span>{errorToast}</span>
+            {/* Room Dimensions (Meters) */}
+            <div className="flex items-center gap-2 border-l border-[#E8E2D2] dark:border-[#3D352E] pl-3">
+              <span className="font-bold text-[#6B5E4C] dark:text-[#B8ACA0]">Room Size:</span>
+              <input
+                type="number"
+                min={5}
+                max={50}
+                value={canvasSettings.widthMeters}
+                onChange={(e) => updateCanvasSettings({ widthMeters: Number(e.target.value) || 10 })}
+                className="w-12 px-1.5 py-1 rounded-lg bg-white dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] text-center font-bold text-[#2D2926] dark:text-white"
+                title="Width in meters"
+              />
+              <span className="text-[#6B5E4C]">m ×</span>
+              <input
+                type="number"
+                min={5}
+                max={50}
+                value={canvasSettings.heightMeters}
+                onChange={(e) => updateCanvasSettings({ heightMeters: Number(e.target.value) || 8 })}
+                className="w-12 px-1.5 py-1 rounded-lg bg-white dark:bg-[#26221E] border border-[#E8E2D2] dark:border-[#3D352E] text-center font-bold text-[#2D2926] dark:text-white"
+                title="Length in meters"
+              />
+              <span className="text-[#6B5E4C]">m</span>
             </div>
-            <button onClick={() => setErrorToast(null)} className="p-1 hover:bg-amber-200/50 rounded-lg">
-              <X className="w-3.5 h-3.5" />
+
+            {/* Grid Snap Toggle */}
+            <div className="flex items-center gap-2 border-l border-[#E8E2D2] dark:border-[#3D352E] pl-3">
+              <label className="flex items-center gap-1.5 cursor-pointer font-bold text-[#6B5E4C] dark:text-[#B8ACA0]">
+                <input
+                  type="checkbox"
+                  checked={canvasSettings.gridSnapEnabled}
+                  onChange={(e) => updateCanvasSettings({ gridSnapEnabled: e.target.checked })}
+                  className="w-4 h-4 rounded text-[#E37A08] focus:ring-[#E37A08]"
+                />
+                <Grid className="w-3.5 h-3.5 text-[#E37A08]" /> Snap to Grid
+              </label>
+            </div>
+          </div>
+
+          {/* Add Landmark Button */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsAddLandmarkOpen(!isAddLandmarkOpen)}
+              className="px-3 py-1.5 rounded-xl bg-[#E37A08] hover:bg-[#c96906] text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add Landmark / Feature
             </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          </div>
+        </motion.div>
+      )}
 
-      {/* Smart Table Suggestion Banner */}
-      <AnimatePresence>
-        {selectedWaitingBooking && bestFitTable && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.98, y: -5 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.98, y: -5 }}
-            className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-[#E37A08]/15 via-[#8B4513]/15 to-[#E37A08]/15 dark:from-[#D2B48C]/15 dark:via-[#3D352E] dark:to-[#D2B48C]/15 border-2 border-[#E37A08] dark:border-[#D2B48C] shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+      {/* Add Landmark Modal / Popover */}
+      {isAddLandmarkOpen && isEditMode && (
+        <div className="mb-4 p-4 rounded-2xl bg-[#FDFBF7] dark:bg-[#1C1917] border-2 border-[#E37A08] shadow-lg flex flex-wrap items-center gap-3">
+          <span className="font-bold text-xs text-[#8B4513] dark:text-[#D2B48C]">New Floor Feature:</span>
+          <input
+            type="text"
+            placeholder="Name e.g. VIP Lounge, Espresso Bar..."
+            value={customLandmarkName}
+            onChange={(e) => setCustomLandmarkName(e.target.value)}
+            className="px-3 py-1.5 rounded-lg border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-xs font-semibold text-[#2D2926] dark:text-white"
+          />
+          <select
+            value={customLandmarkType}
+            onChange={(e) => setCustomLandmarkType(e.target.value as any)}
+            className="px-3 py-1.5 rounded-lg border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-xs font-semibold text-[#2D2926] dark:text-white"
           >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-[#E37A08] text-white flex items-center justify-center font-black text-lg shadow-md shrink-0">
-                T{bestFitTable.id}
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold uppercase tracking-wider text-[#E37A08] dark:text-[#D2B48C] flex items-center gap-1">
-                    <span>★ Smart Table Suggestion</span>
-                  </span>
-                  <span className="text-[10px] bg-[#E37A08]/20 text-[#8B4513] dark:text-[#D2B48C] px-2 py-0.5 rounded-md font-bold">
-                    Best Fit ({bestFitTable.capacity} Seats)
-                  </span>
-                </div>
-                <p className="text-xs sm:text-sm text-[#2D2926] dark:text-white font-medium mt-0.5">
-                  Table {bestFitTable.id} is the smallest vacant table that fits <strong>{selectedWaitingBooking.firstName}</strong> ({formatPartyBreakdownShort(selectedWaitingBooking)}).
-                </p>
-              </div>
-            </div>
+            <option value="door">🚪 Door / Entrance</option>
+            <option value="washroom">🚻 Washroom</option>
+            <option value="kitchen">🍳 Kitchen / Pass</option>
+            <option value="counter">🏪 Pay / Counter</option>
+            <option value="bar">🍷 Bar / Drinks</option>
+            <option value="pos">💳 POS Terminal</option>
+            <option value="waiting">🪑 Waiting Lounge</option>
+            <option value="custom">📍 Custom Landmark</option>
+          </select>
+          <button
+            type="button"
+            onClick={handleAddLandmark}
+            className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs"
+          >
+            Create
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsAddLandmarkOpen(false)}
+            className="px-3 py-1.5 rounded-lg bg-[#E8E2D2] dark:bg-[#3D352E] text-xs font-bold"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                onClick={() => handleTableClick(bestFitTable)}
-                className="w-full sm:w-auto px-4 py-2 rounded-xl bg-[#E37A08] hover:bg-[#c96906] text-white text-xs font-bold shadow-md shadow-[#E37A08]/20 flex items-center justify-center gap-1.5 transition-all transform active:scale-95"
-              >
-                <Check className="w-4 h-4" />
-                <span>Allocate to Table {bestFitTable.id}?</span>
-              </button>
-            </div>
-          </motion.div>
+      {/* Error Toast */}
+      {errorToast && (
+        <div className="mb-4 p-3 rounded-xl bg-rose-100 dark:bg-rose-950/80 border border-rose-300 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs font-bold flex items-center justify-between">
+          <span>{errorToast}</span>
+          <button onClick={() => setErrorToast(null)} className="p-1 hover:opacity-80"><X className="w-4 h-4" /></button>
+        </div>
+      )}
+
+      {/* Merge Selection Banner */}
+      {mergeMode && (
+        <div className="mb-4 p-3 rounded-xl bg-amber-100 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs font-bold flex items-center justify-between">
+          <span>
+            {mergeFirstTableId === null
+              ? "TAP THE FIRST TABLE you wish to merge..."
+              : `Selected Table ${mergeFirstTableId}. NOW TAP THE SECOND TABLE to combine them into one layout!`
+            }
+          </span>
+          <button onClick={() => { setMergeMode(false); setMergeFirstTableId(null); }} className="p-1 hover:opacity-80">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* FREE-POSITION CANVAS CONTAINER */}
+      <div 
+        ref={canvasRef}
+        onPointerMove={handlePointerMoveCanvas}
+        onPointerUp={handlePointerUpCanvas}
+        onPointerLeave={handlePointerUpCanvas}
+        className={`w-full ${getAspectRatioClass()} max-h-[75vh] rounded-3xl bg-[#F5F2EA] dark:bg-[#181513] border-2 ${
+          isEditMode 
+            ? 'border-[#E37A08] shadow-inner cursor-crosshair' 
+            : 'border-[#E8E2D2] dark:border-[#3D352E]'
+        } relative overflow-hidden transition-all`}
+        style={{
+          backgroundImage: isEditMode && canvasSettings.gridSnapEnabled
+            ? 'radial-gradient(rgba(227, 122, 8, 0.25) 1.5px, transparent 1.5px)'
+            : 'radial-gradient(rgba(139, 69, 19, 0.08) 1.5px, transparent 1.5px)',
+          backgroundSize: '24px 24px',
+        }}
+      >
+        {/* Floor Dimension Overlay in Edit Mode */}
+        {isEditMode && (
+          <div className="absolute top-2 left-2 px-2.5 py-1 rounded-lg bg-black/60 backdrop-blur-xs text-[10px] font-mono text-white/90 z-10 pointer-events-none">
+            {canvasSettings.widthMeters}m × {canvasSettings.heightMeters}m ({canvasSettings.aspectRatio})
+          </div>
         )}
-      </AnimatePresence>
 
-      {/* Visual Grid with Landmarks */}
-      {(() => {
-        const handleDropOnColumn = async (col: 'top' | 'left' | 'middle' | 'right') => {
-          setDragOverCol(null);
-          if (!draggedItem) return;
+        {/* 1. RENDER LANDMARKS */}
+        {landmarks.map((lm) => {
+          const coords = getLandmarkCoords(lm);
+          const isSelected = selectedNode?.kind === 'landmark' && selectedNode.id === lm.id;
 
-          if (draggedItem.kind === 'table') {
-            const tId = Number(draggedItem.id);
-            const currentTables = dataService.getTables();
-            const updated = currentTables.map(t => {
-              if (t.id === tId) {
-                const defPos = getTableDefaultPosition(t.id);
-                return {
-                  ...t,
-                  position: {
-                    column: col,
-                    order: (allItems.filter(i => i.column === col).length || 0) + 1,
-                    isDiamond: t.position?.isDiamond ?? defPos.isDiamond
-                  }
-                };
-              }
-              return t;
-            });
-            await dataService.saveTables(updated);
-          } else {
-            const lmId = String(draggedItem.id);
-            const currentLandmarks = dataService.getLandmarks();
-            const updated = currentLandmarks.map(lm => {
-              if (lm.id === lmId) {
-                return {
-                  ...lm,
-                  position: {
-                    column: col,
-                    order: (allItems.filter(i => i.column === col).length || 0) + 1
-                  }
-                };
-              }
-              return lm;
-            });
-            await dataService.setLandmarks(updated);
-          }
-
-          setLayoutToast('Floor plan layout saved!');
-          setTimeout(() => setLayoutToast(null), 2500);
-          onTableUpdated();
-          setDraggedItem(null);
-        };
-
-        const renderLandmarkNode = (lm: LandmarkPosition) => {
-          let icon = <DoorOpen className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C] mb-1" />;
-          let subtitle = 'Main Entrance';
-          if (lm.id === 'washroom') {
-            icon = <Bath className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C] mb-1" />;
-            subtitle = 'Restrooms';
-          } else if (lm.id === 'kitchen') {
-            icon = <UtensilsCrossed className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C] mb-1" />;
-            subtitle = 'Staff Only';
-          } else if (lm.id === 'counter') {
-            icon = <Store className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C] mb-1" />;
-            subtitle = 'Pay / Service';
-          }
+          let icon = <DoorOpen className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C]" />;
+          if (coords.type === 'washroom') icon = <Bath className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C]" />;
+          else if (coords.type === 'kitchen') icon = <UtensilsCrossed className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C]" />;
+          else if (coords.type === 'counter') icon = <Store className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C]" />;
+          else if (coords.type === 'bar') icon = <Wine className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C]" />;
+          else if (coords.type === 'pos') icon = <CreditCard className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C]" />;
+          else if (coords.type === 'waiting') icon = <Armchair className="w-5 h-5 text-[#8B4513] dark:text-[#D2B48C]" />;
 
           return (
             <div
               key={`lm-${lm.id}`}
-              draggable={isEditMode}
-              onDragStart={(e) => {
-                if (!isEditMode) return;
-                e.dataTransfer.setData('text/plain', JSON.stringify({ kind: 'landmark', id: lm.id }));
-                setDraggedItem({ kind: 'landmark', id: lm.id });
+              onPointerDown={(e) => handlePointerDownDrag(e, 'landmark', lm.id, coords.x, coords.y, coords.width, coords.height)}
+              className={`absolute rounded-2xl bg-[#E8E2D2]/80 dark:bg-[#1C1917]/80 border-2 border-dashed border-[#A1917B] dark:border-[#6B5E4C] flex flex-col items-center justify-center p-1.5 text-center text-[#6B5E4C] dark:text-[#B8ACA0] shadow-sm select-none transition-shadow ${
+                isEditMode ? 'cursor-grab active:cursor-grabbing hover:border-[#E37A08]' : ''
+              } ${isSelected ? 'ring-2 ring-[#E37A08] border-[#E37A08] z-20' : 'z-0'}`}
+              style={{
+                left: `${coords.x}%`,
+                top: `${coords.y}%`,
+                width: `${coords.width}%`,
+                height: `${coords.height}%`,
               }}
-              onDragEnd={() => {
-                setDraggedItem(null);
-                setDragOverCol(null);
-              }}
-              className={`w-28 sm:w-36 h-20 sm:h-24 my-2 rounded-2xl bg-[#E8E2D2]/40 dark:bg-[#1C1917]/50 border-2 border-dashed border-[#A1917B]/60 dark:border-[#6B5E4C]/60 flex flex-col items-center justify-center p-2 text-center text-[#6B5E4C] dark:text-[#B8ACA0] shadow-inner select-none mx-auto relative ${
-                isEditMode ? 'cursor-grab active:cursor-grabbing ring-2 ring-[#8B4513] shadow-md' : ''
-              }`}
             >
-              {isEditMode && (
-                <div className="absolute top-1 left-1 bg-[#8B4513] text-white p-1 rounded-md shadow-md z-30">
-                  <GripVertical className="w-3.5 h-3.5" />
+              {icon}
+              <span className="text-[10px] sm:text-xs font-extrabold uppercase tracking-tight text-[#2D2926] dark:text-white truncate max-w-full">
+                {lm.name}
+              </span>
+
+              {/* Resize Handle in Edit Mode */}
+              {isEditMode && isSelected && (
+                <div
+                  onPointerDown={(e) => handlePointerDownResize(e, 'landmark', lm.id, coords.width, coords.height)}
+                  className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[#E37A08] text-white flex items-center justify-center cursor-nwse-resize shadow-md z-30"
+                  title="Drag to resize"
+                >
+                  <Maximize2 className="w-3 h-3" />
                 </div>
               )}
-              {icon}
-              <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider">{lm.name}</span>
-              <span className="text-[9px] font-medium opacity-75">{subtitle}</span>
             </div>
           );
-        };
+        })}
 
-        const landmarks = dataService.getLandmarks();
+        {/* 2. RENDER TABLES */}
+        {tables.map((table) => {
+          const coords = getTableCoords(table);
+          const booking = getTableBooking(table);
+          const isBestFit = bestFitTable?.id === table.id;
+          const isSelectedForMerge = mergeFirstTableId === table.id;
+          const isSelectedNode = selectedNode?.kind === 'table' && selectedNode.id === table.id;
 
-        interface ItemWrapper {
-          isTable: boolean;
-          tableId?: number;
-          landmark?: LandmarkPosition;
-          column: 'left' | 'middle' | 'right' | 'top';
-          order: number;
-        }
+          let statusBg = 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 text-emerald-950 dark:text-emerald-100';
+          let badgeColor = 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300';
 
-        const allItems: ItemWrapper[] = [];
+          if (table.isInactive) {
+            statusBg = 'bg-stone-200 dark:bg-stone-900/60 border-stone-400 text-stone-500 opacity-60';
+            badgeColor = 'bg-stone-300 dark:bg-stone-800 text-stone-600';
+          } else if (table.isOccupied) {
+            statusBg = 'bg-[#E37A08]/15 dark:bg-[#E37A08]/25 border-[#E37A08] text-[#2D2926] dark:text-white';
+            badgeColor = 'bg-[#E37A08] text-white';
+          }
 
-        tables.forEach(t => {
-          const pos = t.position || getTableDefaultPosition(t.id);
-          allItems.push({
-            isTable: true,
-            tableId: t.id,
-            column: pos.column || 'right',
-            order: pos.order || 1
-          });
-        });
+          if (isBestFit && !table.isOccupied && !table.isInactive) {
+            statusBg = 'bg-amber-100 dark:bg-amber-950/60 border-amber-400 text-amber-950 dark:text-amber-100 ring-4 ring-amber-400/50 animate-pulse';
+          }
 
-        landmarks.forEach(lm => {
-          allItems.push({
-            isTable: false,
-            landmark: lm,
-            column: lm.position?.column || 'left',
-            order: lm.position?.order || 1
-          });
-        });
+          if (isSelectedForMerge) {
+            statusBg = 'bg-blue-100 dark:bg-blue-950/80 border-blue-500 ring-4 ring-blue-500/50';
+          }
 
-        const topItems = allItems.filter(i => i.column === 'top').sort((a, b) => a.order - b.order);
-        const leftItems = allItems.filter(i => i.column === 'left').sort((a, b) => a.order - b.order);
-        const middleItems = allItems.filter(i => i.column === 'middle').sort((a, b) => a.order - b.order);
-        const rightItems = allItems.filter(i => i.column === 'right').sort((a, b) => a.order - b.order);
+          const isDiamond = coords.shape === 'diamond';
 
-        const getColumnStyle = (col: 'top' | 'left' | 'middle' | 'right') => {
-          if (!isEditMode) return '';
-          const isOver = dragOverCol === col;
-          return `p-3 rounded-2xl transition-all border-2 ${
-            isOver
-              ? 'border-dashed border-[#E37A08] bg-[#E37A08]/15 ring-4 ring-[#E37A08]/30 scale-[1.01]'
-              : 'border-dashed border-[#E8E2D2] dark:border-[#3D352E] bg-white/40 dark:bg-[#26221E]/30'
-          }`;
-        };
-
-        return (
-          <div className="py-4 bg-[#FFFDF7]/60 dark:bg-[#1C1917]/40 rounded-2xl border border-[#E8E2D2]/60 dark:border-[#3D352E]/60 p-4 sm:p-8">
-            {/* Top Row Drop Zone */}
+          return (
             <div
-              onDragOver={(e) => { e.preventDefault(); if (isEditMode) setDragOverCol('top'); }}
-              onDragLeave={() => { if (isEditMode) setDragOverCol(null); }}
-              onDrop={(e) => { e.preventDefault(); if (isEditMode) handleDropOnColumn('top'); }}
-              className={`mb-6 ${getColumnStyle('top')}`}
+              key={`tbl-${table.id}`}
+              onPointerDown={(e) => {
+                if (isEditMode) {
+                  handlePointerDownDrag(e, 'table', table.id, coords.x, coords.y, coords.width, coords.height);
+                } else {
+                  handleTableClick(table);
+                }
+              }}
+              onClick={() => {
+                if (!isEditMode) handleTableClick(table);
+              }}
+              className={`absolute rounded-2xl border-2 flex flex-col items-center justify-between p-2 shadow-md transition-all select-none ${statusBg} ${
+                isEditMode ? 'cursor-grab active:cursor-grabbing hover:border-[#E37A08]' : 'cursor-pointer hover:scale-[1.02]'
+              } ${isDiamond ? 'rotate-45' : ''} ${isSelectedNode ? 'ring-4 ring-[#E37A08] border-[#E37A08] z-20' : 'z-10'}`}
+              style={{
+                left: `${coords.x}%`,
+                top: `${coords.y}%`,
+                width: `${coords.width}%`,
+                height: `${coords.height}%`,
+              }}
             >
-              {isEditMode && (
-                <div className="text-[10px] font-bold text-[#E37A08] dark:text-[#D2B48C] uppercase tracking-wider text-center mb-2 flex items-center justify-center gap-1">
-                  <Move className="w-3 h-3" />
-                  <span>Top Section (Drop Zone)</span>
-                </div>
-              )}
-              <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-8 min-h-[4rem]">
-                {topItems.length === 0 && isEditMode ? (
-                  <div className="text-xs text-[#6B5E4C]/60 dark:text-[#B8ACA0]/60 italic p-3 text-center">
-                    (Top Section Empty — Drop items here)
-                  </div>
-                ) : (
-                  topItems.map(item => (
-                    <div key={item.isTable ? `t-${item.tableId}` : `lm-${item.landmark?.id}`}>
-                      {item.isTable && item.tableId ? renderTableNode(item.tableId) : item.landmark ? renderLandmarkNode(item.landmark) : null}
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            {/* 3 Columns Layout */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-8 items-start justify-items-center">
-              {/* Left Column Drop Zone */}
-              <div
-                onDragOver={(e) => { e.preventDefault(); if (isEditMode) setDragOverCol('left'); }}
-                onDragLeave={() => { if (isEditMode) setDragOverCol(null); }}
-                onDrop={(e) => { e.preventDefault(); if (isEditMode) handleDropOnColumn('left'); }}
-                className={`flex flex-col gap-4 sm:gap-6 w-full items-center min-h-[12rem] ${getColumnStyle('left')}`}
-              >
-                {isEditMode && (
-                  <div className="text-[10px] font-bold text-[#E37A08] dark:text-[#D2B48C] uppercase tracking-wider text-center flex items-center justify-center gap-1">
-                    <Move className="w-3 h-3" />
-                    <span>Left Column (Drop Zone)</span>
-                  </div>
-                )}
-                {leftItems.length === 0 && isEditMode ? (
-                  <div className="text-xs text-[#6B5E4C]/60 dark:text-[#B8ACA0]/60 italic p-4 text-center my-auto">
-                    (Left Column Empty — Drop items here)
-                  </div>
-                ) : (
-                  leftItems.map(item => (
-                    <div key={item.isTable ? `t-${item.tableId}` : `lm-${item.landmark?.id}`}>
-                      {item.isTable && item.tableId ? renderTableNode(item.tableId) : item.landmark ? renderLandmarkNode(item.landmark) : null}
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* Middle Column Drop Zone */}
-              <div
-                onDragOver={(e) => { e.preventDefault(); if (isEditMode) setDragOverCol('middle'); }}
-                onDragLeave={() => { if (isEditMode) setDragOverCol(null); }}
-                onDrop={(e) => { e.preventDefault(); if (isEditMode) handleDropOnColumn('middle'); }}
-                className={`flex flex-col gap-4 sm:gap-6 w-full items-center justify-center min-h-[12rem] ${getColumnStyle('middle')}`}
-              >
-                {isEditMode && (
-                  <div className="text-[10px] font-bold text-[#E37A08] dark:text-[#D2B48C] uppercase tracking-wider text-center flex items-center justify-center gap-1">
-                    <Move className="w-3 h-3" />
-                    <span>Middle Column (Drop Zone)</span>
-                  </div>
-                )}
-                {middleItems.length === 0 && isEditMode ? (
-                  <div className="text-xs text-[#6B5E4C]/60 dark:text-[#B8ACA0]/60 italic p-4 text-center my-auto">
-                    (Middle Column Empty — Drop items here)
-                  </div>
-                ) : (
-                  middleItems.map(item => (
-                    <div key={item.isTable ? `t-${item.tableId}` : `lm-${item.landmark?.id}`}>
-                      {item.isTable && item.tableId ? renderTableNode(item.tableId) : item.landmark ? renderLandmarkNode(item.landmark) : null}
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* Right Column Drop Zone */}
-              <div
-                onDragOver={(e) => { e.preventDefault(); if (isEditMode) setDragOverCol('right'); }}
-                onDragLeave={() => { if (isEditMode) setDragOverCol(null); }}
-                onDrop={(e) => { e.preventDefault(); if (isEditMode) handleDropOnColumn('right'); }}
-                className={`flex flex-col gap-4 sm:gap-6 w-full items-center min-h-[12rem] ${getColumnStyle('right')}`}
-              >
-                {isEditMode && (
-                  <div className="text-[10px] font-bold text-[#E37A08] dark:text-[#D2B48C] uppercase tracking-wider text-center flex items-center justify-center gap-1">
-                    <Move className="w-3 h-3" />
-                    <span>Right Column (Drop Zone)</span>
-                  </div>
-                )}
-                {rightItems.length === 0 && isEditMode ? (
-                  <div className="text-xs text-[#6B5E4C]/60 dark:text-[#B8ACA0]/60 italic p-4 text-center my-auto">
-                    (Right Column Empty — Drop items here)
-                  </div>
-                ) : (
-                  rightItems.map(item => (
-                    <div key={item.isTable ? `t-${item.tableId}` : `lm-${item.landmark?.id}`}>
-                      {item.isTable && item.tableId ? renderTableNode(item.tableId) : item.landmark ? renderLandmarkNode(item.landmark) : null}
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Override Confirmation Modal for Tables 5 & 6 (+1 chair) */}
-      <AnimatePresence>
-        {overrideConfirmModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-sm bg-white dark:bg-[#26221E] rounded-3xl p-6 shadow-2xl border border-[#E8E2D2] dark:border-[#3D352E] text-center"
-            >
-              <div className="w-14 h-14 rounded-2xl bg-[#F5F2EA] dark:bg-[#1C1917] flex items-center justify-center mx-auto mb-4 text-[#E37A08]">
-                <Plus className="w-7 h-7" />
-              </div>
-              <h3 className="font-serif font-bold text-lg text-[#2D2926] dark:text-white mb-2">
-                Add Extra Chair Override?
-              </h3>
-              <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0] mb-6">
-                <strong>{overrideConfirmModal.table.name}</strong> has a standard capacity of 2 people. 
-                You are allocating a party of <strong>{overrideConfirmModal.booking.partySize}</strong> people ({overrideConfirmModal.booking.firstName} {overrideConfirmModal.booking.lastName}).
-                <br /><br />
-                Do you want to add 1 extra chair to seat them at this table?
-              </p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setOverrideConfirmModal(null)}
-                  className="flex-1 py-2.5 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] text-[#2D2926] dark:text-[#B8ACA0] font-semibold text-xs border border-[#E8E2D2] dark:border-[#3D352E]"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={confirmOverrideAllocation}
-                  className="flex-1 py-2.5 rounded-xl bg-[#E37A08] hover:bg-[#c96906] text-white font-semibold text-xs shadow-md shadow-[#E37A08]/20"
-                >
-                  Confirm (+1 Chair)
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Occupied Table Action Modal (Mark Finished) */}
-      <AnimatePresence>
-        {selectedOccupiedTable && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-sm bg-white dark:bg-[#26221E] rounded-3xl p-6 shadow-2xl border border-[#E8E2D2] dark:border-[#3D352E]"
-            >
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <span className="text-xs font-bold px-2 py-0.5 rounded bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300">
-                    {selectedOccupiedTable.name}
+              {/* Table Content Wrapper (Counter-rotates text if diamond) */}
+              <div className={`w-full h-full flex flex-col items-center justify-between ${isDiamond ? '-rotate-45' : ''}`}>
+                <div className="w-full flex items-center justify-between">
+                  <span className="font-serif font-black text-xs sm:text-sm text-[#8B4513] dark:text-[#D2B48C]">
+                    {table.name}
                   </span>
-                  <h3 className="font-serif font-bold text-lg text-[#2D2926] dark:text-white mt-1">
-                    Table Seating Details
-                  </h3>
-                </div>
-                <button
-                  onClick={() => setSelectedOccupiedTable(null)}
-                  className="p-1 rounded-full hover:bg-[#F5F2EA] dark:hover:bg-[#3D352E]"
-                >
-                  <X className="w-5 h-5 text-[#6B5E4C]" />
-                </button>
-              </div>
-
-              {(() => {
-                const bk = getTableBooking(selectedOccupiedTable);
-                return bk ? (
-                  <div className="space-y-3 bg-[#F5F2EA] dark:bg-[#1C1917]/50 p-4 rounded-2xl mb-6 text-sm border border-[#E8E2D2]/60 dark:border-[#3D352E]/60">
-                    <div className="flex justify-between">
-                      <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Guest Name</span>
-                      <span className="font-semibold text-[#2D2926] dark:text-white">{bk.firstName} {bk.lastName}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Party Size</span>
-                      <span className="font-semibold text-[#2D2926] dark:text-white">{bk.partySize} Guests ({bk.childSeats} child)</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Phone</span>
-                      <span className="font-mono text-[#2D2926] dark:text-white">{bk.phone}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[#6B5E4C] dark:text-[#B8ACA0]">Seated Duration</span>
-                      <span className="font-bold text-rose-600 dark:text-rose-400">{getSeatedDuration(bk.seatedAt)}</span>
-                    </div>
-                    <div className="mt-4 pt-3 border-t border-[#E8E2D2]/50 dark:border-[#3D352E]/50 text-left">
-                      <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase mb-1.5">
-                        Assigned Floor Server
-                      </label>
-                      <select
-                        value={selectedOccupiedTable.assignedServer || ''}
-                        onChange={async (e) => {
-                          const val = e.target.value || null;
-                          await dataService.assignServerToTable(selectedOccupiedTable.id, val);
-                          setSelectedOccupiedTable({ ...selectedOccupiedTable, assignedServer: val || undefined });
-                          onTableUpdated();
-                        }}
-                        className="w-full px-3 py-2.5 rounded-xl bg-white dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-xs font-bold text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
-                      >
-                        <option value="">-- No Server Assigned --</option>
-                        {dataService.getStaffList().map((staffName) => (
-                          <option key={staffName} value={staffName}>
-                            👤 {staffName}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-xs text-[#6B5E4C] mb-6">Occupied table.</p>
-                );
-              })()}
-
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setSelectedOccupiedTable(null)}
-                  className="flex-1 py-3 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] text-[#2D2926] dark:text-[#B8ACA0] font-semibold text-xs border border-[#E8E2D2] dark:border-[#3D352E]"
-                >
-                  Close
-                </button>
-                <button
-                  onClick={() => handleFinishParty(selectedOccupiedTable.id)}
-                  className="flex-1 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-md shadow-emerald-500/20 flex items-center justify-center gap-1.5"
-                >
-                  <Check className="w-4 h-4" />
-                  <span>Mark Finished & Free</span>
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Quick Seat Walk-In Modal */}
-      <AnimatePresence>
-        {quickSeatModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-sm bg-white dark:bg-[#26221E] rounded-3xl p-6 shadow-2xl border border-[#E8E2D2] dark:border-[#3D352E]"
-            >
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <span className="text-xs font-bold px-2 py-0.5 rounded bg-[#E37A08]/10 text-[#E37A08] uppercase">
-                    Quick Seat Walk-In
+                  <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-black ${badgeColor}`}>
+                    {table.capacity}p
                   </span>
-                  <h3 className="font-serif font-bold text-lg text-[#2D2926] dark:text-white mt-1">
-                    {getCleanMergedWith(quickSeatModal.mergedWith) 
-                      ? `Seat party at ${quickSeatModal.name} + Table ${getCleanMergedWith(quickSeatModal.mergedWith)}`
-                      : `Seat party at ${quickSeatModal.name}`}
-                  </h3>
-                  {getCleanMergedWith(quickSeatModal.mergedWith) && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        await dataService.dissolveMerge(quickSeatModal.id);
-                        setQuickSeatModal(null);
-                        onTableUpdated();
-                      }}
-                      className="mt-2 py-1 px-3 bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 rounded-lg text-[11px] font-bold border border-rose-500/20 transition-all cursor-pointer flex items-center gap-1"
-                    >
-                      <span>⛓ Dissolve Table Merge</span>
-                    </button>
+                </div>
+
+                {/* Seated Info or Status */}
+                <div className="text-center my-auto w-full px-1">
+                  {table.isOccupied && booking ? (
+                    <div className="space-y-0.5">
+                      <p className="font-bold text-[10px] sm:text-xs truncate text-[#2D2926] dark:text-white">
+                        {booking.firstName}
+                      </p>
+                      <p className="text-[9px] font-semibold text-[#6B5E4C] dark:text-[#B8ACA0]">
+                        {formatPartyBreakdownShort(booking)}
+                      </p>
+                      <div className="flex items-center justify-center gap-1 text-[9px] font-bold text-[#E37A08]">
+                        <Clock className="w-2.5 h-2.5" />
+                        <span>{getSeatedDuration(booking.seatedAt)}</span>
+                      </div>
+                    </div>
+                  ) : table.isInactive ? (
+                    <span className="text-[9px] font-bold uppercase text-stone-500">Blocked</span>
+                  ) : isBestFit ? (
+                    <span className="text-[9px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-300">★ Best Fit</span>
+                  ) : (
+                    <span className="text-[9px] font-bold uppercase text-emerald-700 dark:text-emerald-400">Available</span>
                   )}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setQuickSeatModal(null)}
-                  className="p-1 rounded-full hover:bg-[#F5F2EA] dark:hover:bg-[#3D352E]"
-                >
-                  <X className="w-5 h-5 text-[#6B5E4C]" />
-                </button>
+
+                {/* Merged or Override Indicator */}
+                <div className="w-full text-center">
+                  {table.mergedWith ? (
+                    <span className="text-[8px] font-extrabold uppercase px-1 rounded bg-blue-500 text-white">
+                      Merged w/ T{table.mergedWith}
+                    </span>
+                  ) : table.maxOverrideCapacity > table.capacity ? (
+                    <span className="text-[8px] font-bold text-[#6B5E4C] dark:text-[#B8ACA0]">
+                      +1 Allowed
+                    </span>
+                  ) : null}
+                </div>
               </div>
 
-              <form onSubmit={handleQuickSeatSubmit} className="space-y-4 text-left">
-                <div>
-                  <label className="block text-xs font-bold text-[#8B4513] dark:text-[#D2B48C] mb-1">
-                    Party Size (Required)
-                  </label>
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setQuickSeatPartySize((prev) => Math.max(1, prev - 1))}
-                      className="w-10 h-10 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] font-bold text-lg border border-[#E8E2D2] flex items-center justify-center"
-                    >
-                      -
-                    </button>
-                    <span className="text-xl font-black font-mono text-center flex-1">
-                      {quickSeatPartySize} {quickSeatPartySize === 1 ? 'Person' : 'People'}
-                    </span>
+              {/* Resize Handle in Edit Mode */}
+              {isEditMode && isSelectedNode && (
+                <div
+                  onPointerDown={(e) => handlePointerDownResize(e, 'table', table.id, coords.width, coords.height)}
+                  className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[#E37A08] text-white flex items-center justify-center cursor-nwse-resize shadow-md z-30"
+                  title="Drag to resize table"
+                >
+                  <Maximize2 className="w-3 h-3" />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* INSPECTOR PANEL FOR SELECTED NODE IN EDIT MODE */}
+      {isEditMode && selectedNode && (
+        <motion.div 
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mt-4 p-4 rounded-2xl bg-[#F5F2EA] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] flex flex-wrap items-center justify-between gap-4"
+        >
+          {selectedNode.kind === 'table' ? (() => {
+            const tId = Number(selectedNode.id);
+            const table = tables.find(t => t.id === tId);
+            if (!table) return null;
+            const coords = getTableCoords(table);
+
+            return (
+              <div className="w-full flex flex-wrap items-center justify-between gap-4 text-xs">
+                <div className="flex items-center gap-3 font-bold">
+                  <span className="font-serif text-sm text-[#8B4513] dark:text-[#D2B48C]">{table.name} Properties:</span>
+                  <span>Capacity: {table.capacity} seats</span>
+                  <span>Width: {coords.width}%</span>
+                  <span>Height: {coords.height}%</span>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-semibold text-[#6B5E4C]">Shape:</span>
                     <button
                       type="button"
                       onClick={() => {
-                        const otherMerged = getCleanMergedWith(quickSeatModal.mergedWith) ? tables.find(t => t.id === Number(getCleanMergedWith(quickSeatModal.mergedWith))) : null;
-                        const maxCap = otherMerged ? quickSeatModal.capacity + otherMerged.capacity : quickSeatModal.maxOverrideCapacity;
-                        setQuickSeatPartySize((prev) => Math.min(maxCap, prev + 1));
+                        const nextShape = coords.shape === 'diamond' ? 'rectangle' : 'diamond';
+                        const updated = tables.map(t => t.id === tId ? { ...t, shape: nextShape } : t);
+                        dataService.saveTables(updated).catch(() => {});
+                        onTableUpdated();
                       }}
-                      className="w-10 h-10 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] font-bold text-lg border border-[#E8E2D2] flex items-center justify-center"
+                      className="px-2.5 py-1 rounded-lg bg-white dark:bg-[#26221E] border font-bold border-[#E8E2D2] dark:border-[#3D352E]"
+                    >
+                      {coords.shape === 'diamond' ? 'Diamond (45°)' : 'Rectangle'}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <span className="font-semibold text-[#6B5E4C]">Capacity:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newCap = Math.max(1, table.capacity - 1);
+                        const updated = tables.map(t => t.id === tId ? { ...t, capacity: newCap, maxOverrideCapacity: Math.max(newCap, t.maxOverrideCapacity) } : t);
+                        dataService.saveTables(updated).catch(() => {});
+                        onTableUpdated();
+                      }}
+                      className="w-6 h-6 rounded bg-white dark:bg-[#26221E] border font-black"
+                    >
+                      -
+                    </button>
+                    <span className="w-6 text-center font-bold">{table.capacity}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newCap = table.capacity + 1;
+                        const updated = tables.map(t => t.id === tId ? { ...t, capacity: newCap, maxOverrideCapacity: Math.max(newCap, t.maxOverrideCapacity) } : t);
+                        dataService.saveTables(updated).catch(() => {});
+                        onTableUpdated();
+                      }}
+                      className="w-6 h-6 rounded bg-white dark:bg-[#26221E] border font-black"
                     >
                       +
                     </button>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedNode(null)}
+                    className="px-3 py-1 rounded-lg bg-[#E8E2D2] dark:bg-[#3D352E] font-bold"
+                  >
+                    Deselect
+                  </button>
+                </div>
+              </div>
+            );
+          })() : (() => {
+            const lmId = String(selectedNode.id);
+            const lm = landmarks.find(l => l.id === lmId);
+            if (!lm) return null;
+
+            return (
+              <div className="w-full flex flex-wrap items-center justify-between gap-4 text-xs">
+                <div className="flex items-center gap-3 font-bold">
+                  <span className="font-serif text-sm text-[#8B4513] dark:text-[#D2B48C]">Landmark: {lm.name}</span>
                 </div>
 
+                <div className="flex items-center gap-3">
+                  {lmId.startsWith('lm_') && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteLandmark(lmId)}
+                      className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold flex items-center gap-1 shadow-xs cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Remove Feature
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedNode(null)}
+                    className="px-3 py-1 rounded-lg bg-[#E8E2D2] dark:bg-[#3D352E] font-bold"
+                  >
+                    Deselect
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+        </motion.div>
+      )}
+
+      {/* OVERRIDE CAPACITY CONFIRM MODAL */}
+      <AnimatePresence>
+        {overrideConfirmModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white dark:bg-[#26221E] rounded-3xl p-6 max-w-md w-full shadow-2xl border border-[#E8E2D2] dark:border-[#3D352E] space-y-4 text-center"
+            >
+              <div className="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-600 flex items-center justify-center mx-auto">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-serif font-bold text-[#2D2926] dark:text-white">
+                Override Table {overrideConfirmModal.table.id} Capacity?
+              </h3>
+              <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0] leading-relaxed">
+                Standard capacity is <strong>{overrideConfirmModal.table.capacity} seats</strong>.
+                Party of <strong>{overrideConfirmModal.booking.partySize}</strong> ({getRequiredTableSeats(overrideConfirmModal.booking)} required table seats) can be seated using the +1 chair override.
+              </p>
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  onClick={() => setOverrideConfirmModal(null)}
+                  className="flex-1 py-3 rounded-2xl bg-[#F5F2EA] dark:bg-[#1C1917] text-[#6B5E4C] dark:text-[#B8ACA0] font-bold text-xs hover:bg-[#E8E2D2] transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    const { table, booking } = overrideConfirmModal;
+                    setOverrideConfirmModal(null);
+                    const res = await dataService.allocateTable(booking.id, table.id);
+                    if (res.success) {
+                      onSelectWaitingBooking(null);
+                      onTableUpdated();
+                    } else {
+                      setErrorToast(res.error || 'Allocation failed.');
+                    }
+                  }}
+                  className="flex-1 py-3 rounded-2xl bg-[#E37A08] hover:bg-[#c96906] text-white font-bold text-xs shadow-md transition-colors cursor-pointer"
+                >
+                  Confirm +1 Override
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* QUICK SEAT WALK-IN MODAL */}
+      <AnimatePresence>
+        {quickSeatModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white dark:bg-[#26221E] rounded-3xl p-6 max-w-md w-full shadow-2xl border border-[#E8E2D2] dark:border-[#3D352E] space-y-4"
+            >
+              <div className="flex items-center justify-between pb-2 border-b border-[#E8E2D2] dark:border-[#3D352E]">
+                <h3 className="text-base font-serif font-bold text-[#2D2926] dark:text-white flex items-center gap-2">
+                  <span>Quick Seat — Table {quickSeatModal.id}</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-sans">Vacant</span>
+                </h3>
+                <button onClick={() => setQuickSeatModal(null)} className="p-1 text-[#6B5E4C] hover:opacity-80">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleQuickSeatSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] mb-1">
-                    Guest Name (Optional)
+                  <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase mb-1">
+                    Party Size
                   </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Walk-In / John"
-                    value={quickSeatName}
-                    onChange={(e) => setQuickSeatName(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-xs text-[#2D2926] dark:text-white"
-                  />
+                  <div className="flex items-center gap-2">
+                    {[1, 2, 3, 4, 5, 6, 7, 8].map((size) => (
+                      <button
+                        type="button"
+                        key={size}
+                        onClick={() => setQuickSeatPartySize(size)}
+                        className={`flex-1 py-2 rounded-xl text-xs font-black transition-all ${
+                          quickSeatPartySize === size
+                            ? 'bg-[#E37A08] text-white shadow-sm'
+                            : 'bg-[#F5F2EA] dark:bg-[#1C1917] text-[#2D2926] dark:text-white hover:bg-[#E8E2D2]'
+                        }`}
+                      >
+                        {size}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase mb-1">
+                      Guest Name (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g., Rajesh"
+                      value={quickSeatName}
+                      onChange={(e) => setQuickSeatName(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-xs font-semibold text-[#2D2926] dark:text-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase mb-1">
+                      Phone Number (Optional)
+                    </label>
+                    <input
+                      type="tel"
+                      placeholder="04xx xxx xxx"
+                      value={quickSeatPhone}
+                      onChange={(e) => setQuickSeatPhone(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-xs font-semibold text-[#2D2926] dark:text-white"
+                    />
+                  </div>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] mb-1">
-                    Phone (Optional)
-                  </label>
-                  <input
-                    type="tel"
-                    placeholder="0400 000 000"
-                    value={quickSeatPhone}
-                    onChange={(e) => setQuickSeatPhone(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-xs text-[#2D2926] dark:text-white font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] mb-1">
-                    Assign Floor Server
+                  <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase mb-1">
+                    Assigned Staff / Server
                   </label>
                   <select
                     value={quickSeatServer}
                     onChange={(e) => setQuickSeatServer(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-xs font-bold text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
+                    className="w-full px-3 py-2 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-xs font-semibold text-[#2D2926] dark:text-white"
                   >
-                    <option value="">-- No Server Assigned --</option>
-                    {dataService.getStaffList().map((staffName) => (
-                      <option key={staffName} value={staffName}>
-                        👤 {staffName}
-                      </option>
+                    <option value="">No specific server</option>
+                    {(dataService.getSettings()?.staffList || ['Amrit', 'Sanjay', 'Vasu']).map((staff: string) => (
+                      <option key={staff} value={staff}>{staff}</option>
                     ))}
                   </select>
                 </div>
 
-                <div className="flex flex-col gap-2 pt-2">
-                  <div className="flex gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setQuickSeatModal(null)}
-                      className="flex-1 py-3 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] text-[#2D2926] dark:text-[#B8ACA0] font-semibold text-xs border border-[#E8E2D2] dark:border-[#3D352E]"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="flex-1 py-3 rounded-xl bg-[#E37A08] hover:bg-[#c96906] text-white font-bold text-xs shadow-md shadow-[#E37A08]/20 flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>Seat Party Here</span>
-                    </button>
-                  </div>
-                  {quickSeatServer !== (quickSeatModal.assignedServer || '') && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        await dataService.assignServerToTable(quickSeatModal.id, quickSeatServer || null);
-                        setQuickSeatModal(null);
-                        onTableUpdated();
-                      }}
-                      className="w-full py-2.5 rounded-xl border border-dashed border-[#E37A08]/50 bg-[#E37A08]/5 hover:bg-[#E37A08]/10 text-[#E37A08] font-bold text-xs transition-all flex items-center justify-center gap-1 cursor-pointer"
-                    >
-                      <span>Assign 👤 {quickSeatServer || 'None'} (No Seating)</span>
-                    </button>
-                  )}
+                <div className="flex items-center gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setQuickSeatModal(null)}
+                    className="flex-1 py-3 rounded-2xl bg-[#F5F2EA] dark:bg-[#1C1917] text-[#6B5E4C] dark:text-[#B8ACA0] font-bold text-xs"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-colors"
+                  >
+                    Seat Party Now
+                  </button>
                 </div>
               </form>
             </motion.div>
           </div>
         )}
+      </AnimatePresence>
+
+      {/* OCCUPIED TABLE DETAILS & ACTIONS MODAL */}
+      <AnimatePresence>
+        {selectedOccupiedTable && (() => {
+          const booking = getTableBooking(selectedOccupiedTable);
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-white dark:bg-[#26221E] rounded-3xl p-6 max-w-md w-full shadow-2xl border border-[#E8E2D2] dark:border-[#3D352E] space-y-4"
+              >
+                <div className="flex items-center justify-between pb-2 border-b border-[#E8E2D2] dark:border-[#3D352E]">
+                  <h3 className="text-base font-serif font-bold text-[#2D2926] dark:text-white flex items-center gap-2">
+                    <span>{selectedOccupiedTable.name} Details</span>
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#E37A08] text-white font-bold">Occupied</span>
+                  </h3>
+                  <button onClick={() => setSelectedOccupiedTable(null)} className="p-1 text-[#6B5E4C] hover:opacity-80">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {booking ? (
+                  <div className="space-y-3 text-xs text-[#2D2926] dark:text-white">
+                    <div className="p-3.5 rounded-2xl bg-[#F5F2EA] dark:bg-[#1C1917] space-y-2">
+                      <div className="flex justify-between items-center">
+                        <span className="font-bold text-sm text-[#8B4513] dark:text-[#D2B48C]">
+                          {booking.firstName} {booking.lastName}
+                        </span>
+                        <span className="font-mono text-xs text-[#6B5E4C] dark:text-[#B8ACA0]">
+                          {booking.phone}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3 text-xs text-[#6B5E4C] dark:text-[#B8ACA0]">
+                        <span>Party Breakdown: <strong>{formatPartyBreakdownShort(booking)}</strong></span>
+                        <span>Seated Time: <strong>{getSeatedDuration(booking.seatedAt)}</strong></span>
+                      </div>
+                      {booking.serverName && (
+                        <p className="text-xs text-[#E37A08] font-bold">
+                          Assigned Server: {booking.serverName}
+                        </p>
+                      )}
+                      {booking.notes && (
+                        <p className="text-xs italic bg-amber-50 dark:bg-amber-950/40 p-2 rounded-xl border border-amber-200 dark:border-amber-900">
+                          Notes: {booking.notes}
+                        </p>
+                      )}
+                    </div>
+
+                    {selectedOccupiedTable.orderingUrl && (
+                      <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 flex items-center justify-between">
+                        <span className="text-xs font-bold text-[#8B4513] dark:text-[#D2B48C]">Square QR Ordering URL:</span>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(selectedOccupiedTable.orderingUrl!);
+                            setLayoutToast('Ordering URL copied!');
+                            setTimeout(() => setLayoutToast(null), 2000);
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-[#E37A08] text-white text-[10px] font-bold"
+                        >
+                          Copy Link
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0]">No active booking record attached.</p>
+                )}
+
+                <div className="flex items-center gap-3 pt-3">
+                  <button
+                    onClick={() => setSelectedOccupiedTable(null)}
+                    className="flex-1 py-3 rounded-2xl bg-[#F5F2EA] dark:bg-[#1C1917] text-[#6B5E4C] dark:text-[#B8ACA0] font-bold text-xs"
+                  >
+                    Close
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const table = selectedOccupiedTable;
+                      setSelectedOccupiedTable(null);
+                      const res = await dataService.finishTable(table.id);
+                      if (res.success) {
+                        onTableUpdated();
+                      } else {
+                        setErrorToast(res.error || 'Failed to mark table finished.');
+                      }
+                    }}
+                    className="flex-1 py-3 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md transition-colors"
+                  >
+                    Mark Party Finished
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
       </AnimatePresence>
     </div>
   );

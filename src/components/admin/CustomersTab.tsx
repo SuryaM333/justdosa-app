@@ -173,14 +173,21 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
         </div>
 
         <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-          <button
-            onClick={handleExportCSV}
-            className="px-3.5 py-1.5 rounded-xl bg-[#8B4513] hover:bg-[#6e360e] text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all shrink-0 cursor-pointer"
-            title="Export full customer dataset to CSV"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>Export CSV</span>
-          </button>
+          {isOwner ? (
+            <button
+              onClick={handleExportCSV}
+              className="px-3.5 py-1.5 rounded-xl bg-[#8B4513] hover:bg-[#6e360e] text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all shrink-0 cursor-pointer"
+              title="Export full customer dataset to CSV"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Export CSV</span>
+            </button>
+          ) : (
+            <span className="px-3 py-1.5 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-bold flex items-center gap-1 border border-amber-500/20 shrink-0">
+              <ShieldAlert className="w-3.5 h-3.5" />
+              <span>Staff Mode (Restricted Data)</span>
+            </span>
+          )}
 
           <span className="text-xs text-[#6B5E4C] font-semibold uppercase tracking-wider shrink-0 ml-2">
             Sort by:
@@ -296,30 +303,40 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
                       </div>
 
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#6B5E4C] dark:text-[#B8ACA0] font-medium">
-                        <span className="font-mono text-[#2D2926] dark:text-zinc-300">{cust.phone}</span>
+                        <span className="font-mono text-[#2D2926] dark:text-zinc-300">
+                          {isOwner ? cust.phone : '•••• — Manager access required'}
+                        </span>
                         <span>Total Visits: <strong className="text-[#8B4513] dark:text-[#D2B48C] font-bold">{cust.totalVisits}</strong></span>
-                        <span>Last Visit: <strong className="text-[#2D2926] dark:text-zinc-300">{formatDate(cust.lastVisitDate)}</strong></span>
+                        <span>Last Visit: <strong className="text-[#2D2926] dark:text-zinc-300">{isOwner ? formatDate(cust.lastVisitDate) : '••••'}</strong></span>
                       </div>
 
-                      {(cust.allergies || cust.notes) && (
-                        <div className="mt-1.5 flex flex-wrap gap-2 text-[11px]">
-                          {cust.allergies && (
-                            <span className="bg-rose-500/10 text-rose-700 dark:text-rose-400 px-2 py-0.5 rounded border border-rose-200 dark:border-rose-900/40 font-semibold flex items-center gap-1">
-                              <span>⚠️ Pref:</span>
-                              <span>{cust.allergies}</span>
-                            </span>
-                          )}
-                          {cust.notes && (
-                            <span className="bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-2 py-0.5 rounded border border-zinc-200 dark:border-zinc-700 font-medium flex items-center gap-1">
-                              <span>📝 Notes:</span>
-                              <span>{cust.notes}</span>
-                            </span>
-                          )}
-                        </div>
+                      {isOwner ? (
+                        (cust.allergies || cust.notes) && (
+                          <div className="mt-1.5 flex flex-wrap gap-2 text-[11px]">
+                            {cust.allergies && (
+                              <span className="bg-rose-500/10 text-rose-700 dark:text-rose-400 px-2 py-0.5 rounded border border-rose-200 dark:border-rose-900/40 font-semibold flex items-center gap-1">
+                                <span>⚠️ Pref:</span>
+                                <span>{cust.allergies}</span>
+                              </span>
+                            )}
+                            {cust.notes && (
+                              <span className="bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-2 py-0.5 rounded border border-zinc-200 dark:border-zinc-700 font-medium flex items-center gap-1">
+                                <span>📝 Notes:</span>
+                                <span>{cust.notes}</span>
+                              </span>
+                            )}
+                          </div>
+                        )
+                      ) : (
+                        (cust.allergies || cust.notes) && (
+                          <div className="mt-1.5 text-[11px] text-zinc-500 dark:text-zinc-400 italic">
+                            Preferences & Notes: •••• — Manager access required
+                          </div>
+                        )
                       )}
 
-                      {/* Past Visits / Booking History */}
-                      {bookings && bookings.filter(b => b.phone === cust.phone).length > 0 && (
+                      {/* Past Visits / Booking History (Owner only) */}
+                      {isOwner && bookings && bookings.filter(b => b.phone === cust.phone).length > 0 && (
                         <div className="mt-2.5 pt-2 border-t border-dashed border-[#E8E2D2] dark:border-[#3D352E]/65 max-w-lg">
                           <span className="text-[10px] uppercase font-bold text-[#6B5E4C] dark:text-[#B8ACA0] block mb-1">
                             Visit History & Staff Logs
@@ -405,17 +422,19 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
                         </button>
                       )}
 
-                      <a
-                        href={waUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm transition-all flex items-center gap-1.5 shrink-0"
-                        title="Send WhatsApp message"
-                      >
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        <span>Chat</span>
-                        <ExternalLink className="w-3 h-3 opacity-80" />
-                      </a>
+                      {isOwner && (
+                        <a
+                          href={waUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="py-2 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs shadow-sm transition-all flex items-center gap-1.5 shrink-0"
+                          title="Send WhatsApp message"
+                        >
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          <span>Chat</span>
+                          <ExternalLink className="w-3 h-3 opacity-80" />
+                        </a>
+                      )}
 
                       {/* Owner actions ONLY */}
                       {isOwner && (

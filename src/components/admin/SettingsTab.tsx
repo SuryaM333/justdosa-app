@@ -35,6 +35,8 @@ export const SettingsTab: React.FC = () => {
   const [dinnerBuffer, setDinnerBuffer] = useState(() => dataService.getDinnerBuffer().toString());
   const [slotInterval, setSlotInterval] = useState(() => dataService.getSlotInterval().toString());
   const [kalyanaEnabled, setKalyanaEnabled] = useState(() => dataService.isKalyanaEnabled());
+  const [kalyanaCutoffMinutes, setKalyanaCutoffMinutes] = useState(() => dataService.getKalyanaCutoffMinutes().toString());
+  const [kalyanaTurnMinutes, setKalyanaTurnMinutes] = useState(() => dataService.getKalyanaTurnMinutes().toString());
   const [kalyanaSlots, setKalyanaSlots] = useState(() => dataService.getKalyanaSlots().map(s => ({ ...s })));
   const [customerTexts, setCustomerTexts] = useState(() => ({ ...dataService.getCustomerTexts() }));
   const [waitTimeAlertThresholds, setWaitTimeAlertThresholds] = useState(() => ({ ...dataService.getWaitTimeAlertThresholds() }));
@@ -71,6 +73,8 @@ export const SettingsTab: React.FC = () => {
       setDinnerBuffer(dataService.getDinnerBuffer().toString());
       setSlotInterval(dataService.getSlotInterval().toString());
       setKalyanaEnabled(dataService.isKalyanaEnabled());
+      setKalyanaCutoffMinutes(dataService.getKalyanaCutoffMinutes().toString());
+      setKalyanaTurnMinutes(dataService.getKalyanaTurnMinutes().toString());
       setKalyanaSlots(dataService.getKalyanaSlots().map(s => ({ ...s })));
       setCustomerTexts({ ...dataService.getCustomerTexts() });
       setWaitTimeAlertThresholds({ ...dataService.getWaitTimeAlertThresholds() });
@@ -236,6 +240,8 @@ export const SettingsTab: React.FC = () => {
         dinnerBuffer: parseInt(dinnerBuffer, 10) || 0,
         slotInterval: parseInt(slotInterval, 10) || 15,
         kalyanaEnabled,
+        kalyanaCutoffMinutes: parseInt(kalyanaCutoffMinutes, 10) || 30,
+        kalyanaTurnMinutes: Math.min(60, Math.max(15, parseInt(kalyanaTurnMinutes, 10) || 45)),
         kalyanaSlots: kalyanaSlots.map(s => ({ ...s, capacity: parseInt(s.capacity as any, 10) })),
         customerTexts,
         waitTimeAlertThresholds: {
@@ -799,6 +805,44 @@ export const SettingsTab: React.FC = () => {
                           </div>
                         </div>
                       ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl border border-[#E8E2D2]/50 dark:border-[#3D352E]/50 bg-[#FDFBF7] dark:bg-[#1C1917]/30">
+                      <div>
+                        <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase mb-1">
+                          Slot Booking Cutoff (Mins Before Slot End)
+                        </label>
+                        <input 
+                          type="number"
+                          min={0}
+                          max={120}
+                          value={kalyanaCutoffMinutes}
+                          onChange={(e) => setKalyanaCutoffMinutes(e.target.value)}
+                          placeholder="30"
+                          className="w-full px-3 py-2 rounded-lg border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-xs font-semibold text-[#2D2926] dark:text-white"
+                        />
+                        <span className="text-[10px] text-[#6B5E4C]/80 dark:text-[#B8ACA0]/80 mt-1 block">
+                          Default: 30 mins (e.g. Slot 1 ends 12:30 PM → Cutoff is 12:00 PM). Shows "Booking closed" to customers.
+                        </span>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase mb-1">
+                          Auto Table-Turn Duration (Mins, Hard Limit 60)
+                        </label>
+                        <input 
+                          type="number"
+                          min={15}
+                          max={60}
+                          value={kalyanaTurnMinutes}
+                          onChange={(e) => setKalyanaTurnMinutes(e.target.value)}
+                          placeholder="45"
+                          className="w-full px-3 py-2 rounded-lg border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-xs font-semibold text-[#2D2926] dark:text-white"
+                        />
+                        <span className="text-[10px] text-[#6B5E4C]/80 dark:text-[#B8ACA0]/80 mt-1 block">
+                          Starts timer when seated; table auto-frees at 45m (hard max 60m) to return to available.
+                        </span>
+                      </div>
                     </div>
                   </div>
                 ) : (

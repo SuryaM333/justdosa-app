@@ -1,6 +1,31 @@
 import { Booking, Customer, DailyStats, Table, LandmarkPosition } from '../types';
 import { smsService } from './smsService';
 import { cleanPhoneNumber, formatAusMobile } from '../utils/phone';
+import { parseToDate } from '../utils/dateUtils';
+
+export interface CustomerSuggestion {
+  phone: string;
+  firstName: string;
+  lastName?: string;
+  allergies?: string;
+  notes?: string;
+  whatsappOptIn?: boolean;
+  totalVisits?: number;
+}
+
+export interface KalyanaSlotLiveInfo {
+  slotId: string;
+  range: string;
+  slotEndTime: string;
+  cutoffTimeStr: string;
+  isClosed: boolean;
+  totalCapacity: number;
+  committedSeats: number;
+  availableSeats: number;
+  totalTables: number;
+  freeTables: Table[];
+  freeTablesSummary: string;
+}
 import { playNewBookingChime } from '../utils/sound';
 import { getRequiredTableSeats } from '../utils/bookingUtils';
 import { initializeApp } from 'firebase/app';
@@ -178,6 +203,38 @@ export function sanitizeFirestoreIncoming<T>(obj: T): T {
   return res;
 }
 
+export function sanitizeOutgoingData(obj: any): any {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj !== 'object') return obj;
+
+  if (
+    typeof obj.toDate === 'function' ||
+    obj instanceof Date ||
+    (obj.constructor && (obj.constructor.name === 'FieldValue' || obj.constructor.name === 'FieldValueImpl')) ||
+    '_methodName' in obj
+  ) {
+    return obj;
+  }
+
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeOutgoingData(item));
+  }
+
+  const proto = Object.getPrototypeOf(obj);
+  if (proto !== null && proto !== Object.prototype) {
+    return obj;
+  }
+
+  const res: any = {};
+  for (const key of Object.keys(obj)) {
+    const val = (obj as any)[key];
+    if (val !== undefined) {
+      res[key] = sanitizeOutgoingData(val);
+    }
+  }
+  return res;
+}
+
 export function getSessionHandledBy(): string | undefined {
   if (typeof window !== 'undefined' && typeof sessionStorage !== 'undefined') {
     const role = sessionStorage.getItem('just_dosa_admin_role');
@@ -191,7 +248,7 @@ export function getSessionHandledBy(): string | undefined {
 }
 
 async function safeSetDoc(docRef: any, data: any, options?: any) {
-  const sanitized = sanitizeData(data);
+  const sanitized = sanitizeOutgoingData(data);
   if (options) {
     return await setDoc(docRef, sanitized, options);
   } else {
@@ -269,6 +326,8 @@ const DEFAULT_SETTINGS = {
   dinnerBuffer: 30,
   slotInterval: 15,
   kalyanaEnabled: true,
+  kalyanaCutoffMinutes: 30,
+  kalyanaTurnMinutes: 45,
   kalyanaSlots: [
     { id: '1', range: 'Slot 1: 11:00am-12:30pm', capacity: 40 },
     { id: '2', range: 'Slot 2: 12:30pm-2:00pm', capacity: 40 },
@@ -288,25 +347,32 @@ const DEFAULT_SETTINGS = {
   },
   staffList: ['Amrit', 'Sanjay', 'Vasu'],
   customerBgUrl: '',
+  floorCanvasSettings: {
+    aspectRatio: '16:9',
+    widthMeters: 14,
+    heightMeters: 9,
+    gridSnapEnabled: true,
+    gridSizePercent: 2.5
+  },
   landmarks: [
-    { id: 'door', name: 'Door / Entry', position: { column: 'left', order: 1 } },
-    { id: 'washroom', name: 'Washroom', position: { column: 'left', order: 5 } },
-    { id: 'kitchen', name: 'Kitchen', position: { column: 'middle', order: 5 } },
-    { id: 'counter', name: 'Counter', position: { column: 'right', order: 5 } },
+    { id: 'door', name: 'Door / Entry', type: 'door', x: 5, y: 85, width: 18, height: 10, position: { column: 'left', order: 1 } },
+    { id: 'washroom', name: 'Washroom', type: 'washroom', x: 28, y: 85, width: 18, height: 10, position: { column: 'left', order: 5 } },
+    { id: 'kitchen', name: 'Kitchen', type: 'kitchen', x: 52, y: 85, width: 20, height: 10, position: { column: 'middle', order: 5 } },
+    { id: 'counter', name: 'Counter', type: 'counter', x: 76, y: 85, width: 20, height: 10, position: { column: 'right', order: 5 } },
   ]
 };
 
 const INITIAL_TABLES: Table[] = [
-  { id: 1, name: 'Table 1', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5c70b0ac601a7db5ad9236', position: { column: 'right', order: 3 } },
-  { id: 2, name: 'Table 2', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5c8e9ca5a01a7db5ad9236', position: { column: 'right', order: 2 } },
-  { id: 3, name: 'Table 3', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5c9f04baf31a7db5ad9236', position: { column: 'right', order: 1 } },
-  { id: 4, name: 'Table 4', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5cac42bcf61a7db5ad9236', position: { column: 'top', order: 1 } },
-  { id: 5, name: 'Table 5', capacity: 2, maxOverrideCapacity: 3, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5cb926a2491a7db5ad9236', position: { column: 'middle', order: 1, isDiamond: true } },
-  { id: 6, name: 'Table 6', capacity: 2, maxOverrideCapacity: 3, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: '', position: { column: 'middle', order: 2, isDiamond: true } },
-  { id: 7, name: 'Table 7', capacity: 2, maxOverrideCapacity: 3, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: '', position: { column: 'middle', order: 3, isDiamond: true } },
-  { id: 8, name: 'Table 8', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5cde429f761a7db5ad9236', position: { column: 'left', order: 3 } },
-  { id: 9, name: 'Table 9', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5ce8d8a1221a7db5ad9236', position: { column: 'left', order: 2 } },
-  { id: 10, name: 'Table 10', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5cf468b6671a7db5ad9236', position: { column: 'left', order: 1 } },
+  { id: 1, name: 'Table 1', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5c70b0ac601a7db5ad9236', x: 76, y: 60, width: 18, height: 18, position: { column: 'right', order: 3 } },
+  { id: 2, name: 'Table 2', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5c8e9ca5a01a7db5ad9236', x: 76, y: 35, width: 18, height: 18, position: { column: 'right', order: 2 } },
+  { id: 3, name: 'Table 3', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5c9f04baf31a7db5ad9236', x: 76, y: 10, width: 18, height: 18, position: { column: 'right', order: 1 } },
+  { id: 4, name: 'Table 4', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5cac42bcf61a7db5ad9236', x: 40, y: 6, width: 22, height: 16, position: { column: 'top', order: 1 } },
+  { id: 5, name: 'Table 5', capacity: 2, maxOverrideCapacity: 3, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5cb926a2491a7db5ad9236', x: 43, y: 28, width: 15, height: 15, shape: 'diamond', position: { column: 'middle', order: 1, isDiamond: true } },
+  { id: 6, name: 'Table 6', capacity: 2, maxOverrideCapacity: 3, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: '', x: 43, y: 46, width: 15, height: 15, shape: 'diamond', position: { column: 'middle', order: 2, isDiamond: true } },
+  { id: 7, name: 'Table 7', capacity: 2, maxOverrideCapacity: 3, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: '', x: 43, y: 64, width: 15, height: 15, shape: 'diamond', position: { column: 'middle', order: 3, isDiamond: true } },
+  { id: 8, name: 'Table 8', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5cde429f761a7db5ad9236', x: 6, y: 60, width: 18, height: 18, position: { column: 'left', order: 3 } },
+  { id: 9, name: 'Table 9', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5ce8d8a1221a7db5ad9236', x: 6, y: 35, width: 18, height: 18, position: { column: 'left', order: 2 } },
+  { id: 10, name: 'Table 10', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5cf468b6671a7db5ad9236', x: 6, y: 10, width: 18, height: 18, position: { column: 'left', order: 1 } },
 ];
 
 async function migratePlaintextPins() {
@@ -581,6 +647,36 @@ if (typeof window !== 'undefined') {
       console.error("Error in background SMS reminder checker:", e);
     }
   }, 30000); // Check every 30 seconds
+
+  // Start periodic background checker for Kalyana auto table-turn (45 min turn timer, hard limit 60 min)
+  setInterval(async () => {
+    try {
+      const turnMins = dataService.getKalyanaTurnMinutes();
+      const nowMs = Date.now();
+
+      const seatedKalyana = cachedBookings.filter(b => 
+        b.status === 'seated' && 
+        b.isKalyanaVirundhu && 
+        b.tableId && 
+        b.seatedAt
+      );
+
+      for (const booking of seatedKalyana) {
+        const seatedDate = parseToDate(booking.seatedAt);
+        if (!seatedDate) continue;
+        const elapsedMins = (nowMs - seatedDate.getTime()) / 60000;
+        
+        if (elapsedMins >= turnMins) {
+          console.log(`Auto-turning Kalyana table ${booking.tableId} for ${booking.firstName} after ${Math.round(elapsedMins)} mins (limit: ${turnMins}m).`);
+          if (booking.tableId) {
+            await dataService.finishSeatedParty(booking.tableId);
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Error in Kalyana auto table-turn checker:", e);
+    }
+  }, 10000); // Check every 10 seconds
 }
 
 // ----------------------------------------------------
@@ -790,6 +886,171 @@ export const dataService = {
     }
   },
 
+  getKalyanaCutoffMinutes(): number {
+    return (cachedSettings && typeof cachedSettings.kalyanaCutoffMinutes === 'number')
+      ? cachedSettings.kalyanaCutoffMinutes
+      : DEFAULT_SETTINGS.kalyanaCutoffMinutes;
+  },
+
+  async setKalyanaCutoffMinutes(mins: number) {
+    try {
+      const val = Math.max(0, mins);
+      await safeSetDoc(doc(db, 'settings', 'global'), { kalyanaCutoffMinutes: val }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  getKalyanaTurnMinutes(): number {
+    return (cachedSettings && typeof cachedSettings.kalyanaTurnMinutes === 'number')
+      ? Math.min(60, Math.max(15, cachedSettings.kalyanaTurnMinutes))
+      : DEFAULT_SETTINGS.kalyanaTurnMinutes;
+  },
+
+  async setKalyanaTurnMinutes(mins: number) {
+    try {
+      const val = Math.min(60, Math.max(15, mins));
+      await safeSetDoc(doc(db, 'settings', 'global'), { kalyanaTurnMinutes: val }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  searchCustomerSuggestions(query: string): CustomerSuggestion[] {
+    if (!query || query.trim().length < 2) return [];
+    const q = query.trim().toLowerCase();
+    const cleanQ = cleanPhoneNumber(q) || q;
+    const results: Map<string, CustomerSuggestion> = new Map();
+
+    // 1. Search cachedCustomers
+    Object.values(cachedCustomers).forEach(c => {
+      const pClean = cleanPhoneNumber(c.phone) || c.phone;
+      const fName = (c.firstName || '').toLowerCase();
+      const lName = (c.lastName || '').toLowerCase();
+      if (
+        (c.phone && c.phone.toLowerCase().includes(q)) ||
+        (pClean && pClean.includes(cleanQ)) ||
+        fName.includes(q) ||
+        lName.includes(q)
+      ) {
+        const key = pClean || c.phone;
+        results.set(key, {
+          phone: c.phone,
+          firstName: c.firstName || '',
+          lastName: c.lastName || '',
+          allergies: c.allergies || '',
+          notes: c.notes || '',
+          whatsappOptIn: c.whatsappOptIn ?? true,
+          totalVisits: c.totalVisits || 1,
+        });
+      }
+    });
+
+    // 2. Search cachedBookings
+    cachedBookings.forEach(b => {
+      const pClean = cleanPhoneNumber(b.phone) || b.phone;
+      const key = pClean || b.phone;
+      if (key && !results.has(key)) {
+        const fName = (b.firstName || '').toLowerCase();
+        const lName = (b.lastName || '').toLowerCase();
+        if (
+          (b.phone && b.phone.toLowerCase().includes(q)) ||
+          (pClean && pClean.includes(cleanQ)) ||
+          fName.includes(q) ||
+          lName.includes(q)
+        ) {
+          results.set(key, {
+            phone: b.phone,
+            firstName: b.firstName || '',
+            lastName: b.lastName || '',
+            allergies: b.allergies || '',
+            notes: b.notes || '',
+            whatsappOptIn: b.whatsappOptIn ?? true,
+            totalVisits: 1,
+          });
+        }
+      }
+    });
+
+    return Array.from(results.values()).slice(0, 5);
+  },
+
+  getKalyanaLiveAvailability(selectedDate?: string): KalyanaSlotLiveInfo[] {
+    const today = new Date().toISOString().split('T')[0];
+    const targetDate = selectedDate || today;
+    const isToday = targetDate === today;
+
+    const slots = this.getKalyanaSlots();
+    const activeTables = this.getTables().filter(t => !t.isInactive);
+    const totalTablesCount = activeTables.length;
+    const totalSeatsCount = activeTables.reduce((acc, t) => acc + (t.capacity || 0), 0);
+
+    const cutoffMins = this.getKalyanaCutoffMinutes();
+    const now = new Date();
+    const currentMins = now.getHours() * 60 + now.getMinutes();
+
+    const dateBookings = cachedBookings.filter(b => 
+      b.bookingDate === targetDate && 
+      b.status !== 'cancelled' && 
+      b.status !== 'declined'
+    );
+
+    const slotEndTimeMap: Record<string, string> = {
+      '1': '12:30',
+      '2': '14:00',
+      '3': '15:30',
+    };
+
+    return slots.map((slot, index) => {
+      const slotId = slot.id || String(index + 1);
+      const slotEndTime = slotEndTimeMap[slotId] || (index === 0 ? '12:30' : index === 1 ? '14:00' : '15:30');
+      
+      const [endH, endM] = slotEndTime.split(':').map(Number);
+      const slotEndInMins = endH * 60 + endM;
+      const cutoffInMins = slotEndInMins - cutoffMins;
+      const cutoffH = Math.floor(Math.max(0, cutoffInMins) / 60);
+      const cutoffM = Math.max(0, cutoffInMins) % 60;
+      const cutoffTimeStr = `${cutoffH.toString().padStart(2, '0')}:${cutoffM.toString().padStart(2, '0')}`;
+
+      const isClosed = isToday && (currentMins >= cutoffInMins);
+
+      const slotBookings = dateBookings.filter(b => 
+        (b.isKalyanaVirundhu || b.kalyanaSlot) && 
+        (b.kalyanaSlot === slot.range || b.kalyanaSlot === slotId || b.bookingTime === slot.range)
+      );
+
+      const committedSeats = slotBookings.reduce((sum, b) => sum + (b.partySize || 1), 0);
+      const totalCapacity = slot.capacity || totalSeatsCount;
+      const availableSeats = Math.max(0, totalCapacity - committedSeats);
+
+      const assignedTableIds = new Set(slotBookings.map(b => b.tableId).filter(Boolean));
+      const freeTables = activeTables.filter(t => !assignedTableIds.has(t.id));
+
+      let freeTablesSummary = '';
+      if (freeTables.length === 0) {
+        freeTablesSummary = 'No tables free';
+      } else {
+        const tableDetails = freeTables.map(t => `T${t.id} (${t.capacity}s)`).join(', ');
+        const totalFreeSeats = freeTables.reduce((s, t) => s + t.capacity, 0);
+        freeTablesSummary = `Tables ${freeTables.map(t => t.id).join(', ')} free — ${totalFreeSeats} seats (${tableDetails})`;
+      }
+
+      return {
+        slotId,
+        range: slot.range,
+        slotEndTime,
+        cutoffTimeStr,
+        isClosed,
+        totalCapacity,
+        committedSeats,
+        availableSeats,
+        totalTables: totalTablesCount,
+        freeTables,
+        freeTablesSummary
+      };
+    });
+  },
+
   getCustomerTexts(): { welcomeLine: string; waitingReassurance: string; tableReadyTemplate: string; thankYouMessage: string; noOrderingUrlNote: string } {
     return (cachedSettings && typeof cachedSettings.customerTexts === 'object' && cachedSettings.customerTexts !== null)
       ? { ...DEFAULT_SETTINGS.customerTexts, ...cachedSettings.customerTexts }
@@ -830,6 +1091,37 @@ export const dataService = {
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
+  },
+
+  getSettings(): typeof DEFAULT_SETTINGS {
+    return (cachedSettings && typeof cachedSettings === 'object')
+      ? { ...DEFAULT_SETTINGS, ...cachedSettings }
+      : DEFAULT_SETTINGS;
+  },
+
+  async updateSettings(updates: any) {
+    try {
+      if (cachedSettings) {
+        Object.assign(cachedSettings, updates);
+      }
+      await safeSetDoc(doc(db, 'settings', 'global'), updates, { merge: true });
+      notifyListeners();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  async finishTable(tableId: number): Promise<{ success: boolean; error?: string }> {
+    try {
+      await this.finishSeatedParty(tableId);
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Failed to finish table' };
+    }
+  },
+
+  async addQuickWalkinAndSeat(data: { tableId: number; partySize: number; name?: string; phone?: string; serverName?: string }): Promise<{ success: boolean; error?: string }> {
+    return this.seatWalkInDirectly(data.tableId, data.partySize, data.name || 'Walk-In', data.phone || '0400 000 000', 0, data.serverName);
   },
 
   getLandmarks(): LandmarkPosition[] {
@@ -1494,7 +1786,7 @@ export const dataService = {
     return (waitingCount + 1) * 15;
   },
 
-  async allocateTable(bookingId: string, tableId: number, handledBy?: string): Promise<{ success: boolean; error?: string }> {
+  async allocateTable(bookingId: string, tableId: number, handledBy?: string, extraSeats: number = 0): Promise<{ success: boolean; error?: string }> {
     const prevTables = JSON.parse(JSON.stringify(cachedTables));
     const prevBookings = JSON.parse(JSON.stringify(cachedBookings));
 
@@ -1504,6 +1796,7 @@ export const dataService = {
     if (optTable && optBooking && !optTable.isOccupied && !optTable.isInactive) {
       optTable.isOccupied = true;
       optTable.currentBookingId = bookingId;
+      optTable.extraSeats = extraSeats;
       if (optTable.mergedWith) {
         const optOther = cachedTables.find((t) => t.id === optTable.mergedWith);
         if (optOther) {
@@ -1544,28 +1837,31 @@ export const dataService = {
         }
 
         const requiredSeats = getRequiredTableSeats(booking);
-        let maxCap = table.maxOverrideCapacity;
+        let maxCap = table.capacity + extraSeats;
         if (table.mergedWith) {
           const otherTable = cachedTables.find((t) => t.id === table.mergedWith);
           if (otherTable) {
-            maxCap = table.capacity + otherTable.capacity;
+            maxCap += otherTable.capacity + (otherTable.extraSeats || 0);
           }
         }
+        maxCap = Math.max(maxCap, table.maxOverrideCapacity);
+
         if (requiredSeats > maxCap) {
           return { 
             success: false, 
-            error: `Party of ${booking.partySize} (${requiredSeats} required table seats) exceeds Table ${tableId} combined maximum capacity (${maxCap})` 
+            error: `Party of ${booking.partySize} (${requiredSeats} required table seats) exceeds Table ${tableId} maximum capacity (${maxCap})` 
           };
         }
 
-        transaction.update(tableDocRef, sanitizeData({
+        transaction.update(tableDocRef, sanitizeOutgoingData({
           isOccupied: true,
-          currentBookingId: booking.id
+          currentBookingId: booking.id,
+          extraSeats
         }));
 
         if (table.mergedWith) {
           const otherDocRef = doc(db, 'tables', table.mergedWith.toString());
-          transaction.update(otherDocRef, sanitizeData({
+          transaction.update(otherDocRef, sanitizeOutgoingData({
             isOccupied: true,
             currentBookingId: booking.id
           }));
@@ -1582,7 +1878,7 @@ export const dataService = {
           bookingUpdate.handledBy = handledByVal;
         }
 
-        transaction.update(bookingDocRef, sanitizeData(bookingUpdate));
+        transaction.update(bookingDocRef, sanitizeOutgoingData(bookingUpdate));
 
         return { success: true };
       });
@@ -1612,186 +1908,182 @@ export const dataService = {
   },
 
   async finishSeatedParty(tableId: number, handledBy?: string): Promise<void> {
-    const prevTables = JSON.parse(JSON.stringify(cachedTables));
-    const prevBookings = JSON.parse(JSON.stringify(cachedBookings));
+    const tableToFinish = cachedTables.find((t) => t.id === tableId);
+    const bId = tableToFinish?.currentBookingId;
 
-    // Optimistic local update
-    const optTable = cachedTables.find((t) => t.id === tableId);
-    if (optTable) {
-      const bId = optTable.currentBookingId;
-      optTable.isOccupied = false;
-      optTable.currentBookingId = undefined;
-      if (optTable.mergedWith) {
-        const optOther = cachedTables.find((t) => t.id === optTable.mergedWith);
-        if (optOther) {
-          optOther.isOccupied = false;
-          optOther.currentBookingId = undefined;
-        }
-      }
-      if (bId) {
-        const optBooking = cachedBookings.find((b) => b.id === bId);
-        if (optBooking) {
-          optBooking.status = 'finished';
-          optBooking.finishedAt = new Date().toISOString();
-        }
-      }
-      notifyListeners();
+    // Find all tables that share this tableId OR bookingId OR are merged with tableId
+    const affectedTables = cachedTables.filter(t => 
+      t.id === tableId || 
+      (bId && t.currentBookingId === bId) || 
+      t.mergedWith === tableId || 
+      (tableToFinish?.mergedWith && t.id === tableToFinish.mergedWith)
+    );
+
+    // Optimistic local update for all affected tables
+    for (const t of affectedTables) {
+      t.isOccupied = false;
+      t.currentBookingId = undefined;
+      t.mergedWith = undefined;
+      t.extraSeats = 0;
     }
 
-    try {
-      const tableDocRef = doc(db, 'tables', tableId.toString());
-      const tableSnap = await getDoc(tableDocRef);
-      if (!tableSnap.exists()) return;
-      const table = tableSnap.data() as Table;
-      const bookingId = table.currentBookingId;
-      if (!bookingId) return;
-
-      const bookingDocRef = doc(db, 'bookings', bookingId);
-      const bookingSnap = await getDoc(bookingDocRef);
-
-      if (bookingSnap.exists()) {
-        const booking = bookingSnap.data() as Booking;
-        const finishedAt = new Date().toISOString();
-
-        const bookingUpdate: any = {
-          status: 'finished',
-          finishedAt
-        };
-        const handledByVal = handledBy || getSessionHandledBy();
-        if (handledByVal) {
-          bookingUpdate.handledBy = handledByVal;
-        }
-
-        await safeSetDoc(bookingDocRef, bookingUpdate, { merge: true });
-
-        const cleaned = cleanPhoneNumber(booking.phone);
-        const customerDocRef = doc(db, 'customers', cleaned);
-        const customerSnap = await getDoc(customerDocRef);
-        if (customerSnap.exists()) {
-          const customer = customerSnap.data() as Customer;
-          await safeSetDoc(customerDocRef, {
-            totalVisits: (customer.totalVisits || 0) + 1,
-            lastVisitDate: finishedAt,
-            firstName: booking.firstName || customer.firstName,
-            lastName: booking.lastName || customer.lastName
-          }, { merge: true });
-        } else {
-          await safeSetDoc(customerDocRef, {
-            phone: booking.phone,
-            firstName: booking.firstName,
-            lastName: booking.lastName,
-            totalVisits: 1,
-            lastVisitDate: finishedAt,
-            noShowCount: 0,
-            cancellationCount: 0,
-            whatsappOptIn: booking.whatsappOptIn,
-            branchId: 'millpark',
-          });
-        }
+    if (bId) {
+      const optBooking = cachedBookings.find((b) => b.id === bId);
+      if (optBooking) {
+        optBooking.status = 'finished';
+        optBooking.finishedAt = new Date().toISOString();
       }
+    }
+    notifyListeners();
 
-      await safeSetDoc(tableDocRef, {
-        isOccupied: false,
-        currentBookingId: null,
-        mergedWith: deleteField()
-      }, { merge: true });
-
-      if (table.mergedWith) {
-        const otherRef = doc(db, 'tables', table.mergedWith.toString());
-        await safeSetDoc(otherRef, {
+    try {
+      // 1. Free all affected tables in Firestore
+      for (const t of affectedTables) {
+        const tableDocRef = doc(db, 'tables', t.id.toString());
+        await safeSetDoc(tableDocRef, {
           isOccupied: false,
           currentBookingId: null,
-          mergedWith: deleteField()
+          mergedWith: deleteField(),
+          extraSeats: 0
         }, { merge: true });
       }
 
+      // Also directly clear the main tableDocRef just in case
+      const mainRef = doc(db, 'tables', tableId.toString());
+      await safeSetDoc(mainRef, {
+        isOccupied: false,
+        currentBookingId: null,
+        mergedWith: deleteField(),
+        extraSeats: 0
+      }, { merge: true });
+
+      // 2. Mark booking finished if exists
+      if (bId) {
+        const bookingDocRef = doc(db, 'bookings', bId);
+        const bookingSnap = await getDoc(bookingDocRef);
+        if (bookingSnap.exists()) {
+          const booking = bookingSnap.data() as Booking;
+          const finishedAt = new Date().toISOString();
+
+          const bookingUpdate: any = {
+            status: 'finished',
+            finishedAt
+          };
+          const handledByVal = handledBy || getSessionHandledBy();
+          if (handledByVal) {
+            bookingUpdate.handledBy = handledByVal;
+          }
+
+          await safeSetDoc(bookingDocRef, bookingUpdate, { merge: true });
+
+          const cleaned = cleanPhoneNumber(booking.phone);
+          if (cleaned) {
+            const customerDocRef = doc(db, 'customers', cleaned);
+            const customerSnap = await getDoc(customerDocRef);
+            if (customerSnap.exists()) {
+              const customer = customerSnap.data() as Customer;
+              await safeSetDoc(customerDocRef, {
+                totalVisits: (customer.totalVisits || 0) + 1,
+                lastVisitDate: finishedAt,
+                firstName: booking.firstName || customer.firstName,
+                lastName: booking.lastName || customer.lastName
+              }, { merge: true });
+            } else {
+              await safeSetDoc(customerDocRef, {
+                phone: booking.phone,
+                firstName: booking.firstName,
+                lastName: booking.lastName,
+                totalVisits: 1,
+                lastVisitDate: finishedAt,
+                noShowCount: 0,
+                cancellationCount: 0,
+                whatsappOptIn: booking.whatsappOptIn,
+                branchId: 'millpark',
+              });
+            }
+          }
+        }
+      }
+
       await this.updateAllWaitingEstimates();
-      await this.syncSlotOccupancyForBookingId(bookingId);
+      if (bId) {
+        await this.syncSlotOccupancyForBookingId(bId);
+      }
     } catch (error) {
+      console.error("Error in finishSeatedParty:", error);
       handleFirestoreError(error, OperationType.WRITE, `tables/${tableId}`);
     }
   },
 
   async autoFinishPreviousDaySeatedParties(): Promise<number> {
     try {
-      const todayStr = new Date().toLocaleDateString('en-CA');
-      const seatedParties = cachedBookings.filter((b) => {
-        if (b.status !== 'seated') return false;
-        const refDate = b.bookingDate || (b.seatedAt ? b.seatedAt.split('T')[0] : b.createdAt.split('T')[0]);
-        return refDate < todayStr;
-      });
-
-      if (seatedParties.length === 0) return 0;
-
+      const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+      const nowMs = Date.now();
       let count = 0;
-      for (const booking of seatedParties) {
-        const finishedAt = new Date().toISOString();
-        const bookingDocRef = doc(db, 'bookings', booking.id);
 
-        await safeSetDoc(bookingDocRef, {
-          status: 'finished',
-          finishedAt
-        }, { merge: true });
-
-        // Update customer profile
-        const cleaned = cleanPhoneNumber(booking.phone);
-        const customerDocRef = doc(db, 'customers', cleaned);
-        const customerSnap = await getDoc(customerDocRef);
-        if (customerSnap.exists()) {
-          const customer = customerSnap.data() as Customer;
-          await safeSetDoc(customerDocRef, {
-            totalVisits: (customer.totalVisits || 0) + 1,
-            lastVisitDate: finishedAt,
-            firstName: booking.firstName || customer.firstName,
-            lastName: booking.lastName || customer.lastName
-          }, { merge: true });
+      const occupiedTables = cachedTables.filter(t => t.isOccupied);
+      for (const table of occupiedTables) {
+        let shouldFinish = false;
+        if (!table.currentBookingId) {
+          shouldFinish = true;
         } else {
-          await safeSetDoc(customerDocRef, {
-            phone: booking.phone,
-            firstName: booking.firstName,
-            lastName: booking.lastName,
-            totalVisits: 1,
-            lastVisitDate: finishedAt,
-            noShowCount: 0,
-            cancellationCount: 0,
-            whatsappOptIn: booking.whatsappOptIn,
-            branchId: 'millpark',
-          });
-        }
-
-        // Find table and clear it
-        const table = cachedTables.find((t) => t.currentBookingId === booking.id);
-        if (table) {
-          const tableDocRef = doc(db, 'tables', table.id.toString());
-          await safeSetDoc(tableDocRef, {
-            isOccupied: false,
-            currentBookingId: null,
-            mergedWith: deleteField()
-          }, { merge: true });
-
-          if (table.mergedWith) {
-            const otherRef = doc(db, 'tables', table.mergedWith.toString());
-            await safeSetDoc(otherRef, {
-              isOccupied: false,
-              currentBookingId: null,
-              mergedWith: deleteField()
-            }, { merge: true });
+          const booking = cachedBookings.find(b => b.id === table.currentBookingId);
+          if (!booking || booking.status === 'finished' || booking.status === 'cancelled') {
+            shouldFinish = true;
+          } else {
+            const refDateStr = booking.bookingDate || (booking.seatedAt ? booking.seatedAt.split('T')[0] : booking.createdAt.split('T')[0]);
+            const seatedMs = booking.seatedAt ? new Date(booking.seatedAt).getTime() : new Date(booking.createdAt).getTime();
+            const elapsedHours = (nowMs - seatedMs) / (1000 * 3600);
+            
+            if (refDateStr < todayStr || elapsedHours > 14) {
+              shouldFinish = true;
+            }
           }
         }
 
-        await this.syncSlotOccupancyForBookingId(booking.id);
-        count++;
+        if (shouldFinish) {
+          console.log(`Auto-finishing stale occupied table ${table.id} (${table.name})`);
+          await this.finishSeatedParty(table.id);
+          count++;
+        }
       }
-
       if (count > 0) {
         await this.updateAllWaitingEstimates();
       }
-
       return count;
     } catch (err) {
-      console.error("Error auto-finishing previous day seated parties:", err);
+      console.error("Error auto-finishing stale tables:", err);
       return 0;
     }
+  },
+
+  getLiveSeatAvailability(date?: string, time?: string) {
+    const activeTables = cachedTables.filter(t => !t.isInactive);
+    const totalTables = activeTables.length;
+    const vacantTables = activeTables.filter(t => !t.isOccupied).length;
+    const totalCapacity = activeTables.reduce((sum, t) => sum + t.capacity + (t.extraSeats || 0), 0);
+    const availableSeats = activeTables
+      .filter(t => !t.isOccupied)
+      .reduce((sum, t) => sum + t.capacity + (t.extraSeats || 0), 0);
+
+    let bookedSeatsForSlot = 0;
+    if (date) {
+      const slotBookings = cachedBookings.filter(b => {
+        if (b.bookingDate !== date) return false;
+        if (time && b.bookingTime && b.bookingTime !== time) return false;
+        return ['pending', 'confirmed', 'booked', 'seated'].includes(b.status);
+      });
+      bookedSeatsForSlot = slotBookings.reduce((sum, b) => sum + b.partySize, 0);
+    }
+
+    return {
+      totalTables,
+      vacantTables,
+      totalCapacity,
+      availableSeats,
+      bookedSeatsForSlot,
+      availableForSlot: Math.max(0, totalCapacity - bookedSeatsForSlot)
+    };
   },
 
   async markBookingArrived(bookingId: string) {

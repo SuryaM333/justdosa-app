@@ -8,6 +8,8 @@ interface NavbarProps {
   onExitAdmin?: () => void;
   unreadCount: number;
   onGoToModeChoice?: () => void;
+  isDark?: boolean;
+  onToggleTheme?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -16,31 +18,11 @@ export const Navbar: React.FC<NavbarProps> = ({
   onExitAdmin,
   unreadCount,
   onGoToModeChoice,
+  isDark = true,
+  onToggleTheme,
 }) => {
-  const [isDark, setIsDark] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('just_dosa_theme');
-      if (saved) return saved === 'dark';
-      return document.documentElement.classList.contains('dark');
-    }
-    return false;
-  });
-
-  useEffect(() => {
-    if (isDark) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('just_dosa_theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('just_dosa_theme', 'light');
-    }
-  }, [isDark]);
-
-  const toggleDarkMode = () => {
-    setIsDark(prev => !prev);
-  };
   return (
-    <header className="sticky top-0 z-50 border-b bg-[#1C1917]/90 border-[#3D352E] text-[#FDFBF7] backdrop-blur-md">
+    <header className="sticky top-0 z-50 border-b bg-white/90 dark:bg-[#1C1917]/90 border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-[#FDFBF7] backdrop-blur-md transition-colors duration-200">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
         {/* Left header group */}
         <div className="flex items-center gap-2 sm:gap-3">
@@ -50,10 +32,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 e.stopPropagation();
                 onGoToModeChoice();
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#26221E] hover:bg-[#3D352E] text-xs font-bold text-[#D2B48C] hover:text-[#FF9F3B] transition-all border border-[#3D352E] shadow-sm cursor-pointer mr-1 sm:mr-2"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F5F2EA] dark:bg-[#26221E] hover:bg-[#E8E2D2] dark:hover:bg-[#3D352E] text-xs font-bold text-[#8B4513] dark:text-[#D2B48C] hover:text-[#E37A08] dark:hover:text-[#FF9F3B] transition-all border border-[#E8E2D2] dark:border-[#3D352E] shadow-xs cursor-pointer mr-1 sm:mr-2"
               title="Return to Mode Choice Screen"
             >
-              <svg className="w-3.5 h-3.5 text-[#D2B48C]/95" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <svg className="w-3.5 h-3.5 text-[#8B4513] dark:text-[#D2B48C]/95" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
               </svg>
               <span>Menu</span>
@@ -70,14 +52,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="font-serif font-bold text-xl sm:text-2xl tracking-tight text-[#D2B48C]">
+                <span className="font-serif font-bold text-xl sm:text-2xl tracking-tight text-[#8B4513] dark:text-[#D2B48C]">
                   Just Dosa
                 </span>
-                <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md font-semibold bg-[#D2B48C]/10 text-[#D2B48C] border border-[#3D352E]">
+                <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-md font-semibold bg-[#8B4513]/10 dark:bg-[#D2B48C]/10 text-[#8B4513] dark:text-[#D2B48C] border border-[#E8E2D2] dark:border-[#3D352E]">
                   Melbourne
                 </span>
               </div>
-              <p className="text-[10px] uppercase tracking-widest text-[#B8ACA0] font-semibold hidden sm:block">
+              <p className="text-[10px] uppercase tracking-widest text-[#6B5E4C] dark:text-[#B8ACA0] font-semibold hidden sm:block">
                 Authentic South Indian • Mill Park, Melbourne
               </p>
             </div>
@@ -88,22 +70,22 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div className="flex items-center gap-2 sm:gap-3">
           {/* Dark Mode Toggle Button */}
           <button
-            onClick={toggleDarkMode}
-            className="p-2.5 rounded-xl bg-[#26221E] hover:bg-[#3D352E] text-[#D2B48C] hover:text-[#FF9F3B] transition-all border border-[#3D352E] shadow-sm cursor-pointer flex items-center justify-center"
-            title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            onClick={onToggleTheme}
+            className="p-2.5 rounded-xl bg-[#F5F2EA] dark:bg-[#26221E] hover:bg-[#E8E2D2] dark:hover:bg-[#3D352E] text-[#8B4513] dark:text-[#D2B48C] hover:text-[#E37A08] dark:hover:text-[#FF9F3B] transition-all border border-[#E8E2D2] dark:border-[#3D352E] shadow-xs cursor-pointer flex items-center justify-center"
+            title={isDark ? "Switch to Light Mode (9am-5pm default)" : "Switch to Dark Mode (5:01pm-8:59am default)"}
             aria-label="Toggle dark mode"
           >
             {isDark ? (
               <Sun className="w-4 h-4 text-amber-400" />
             ) : (
-              <Moon className="w-4 h-4 text-[#D2B48C]" />
+              <Moon className="w-4 h-4 text-[#8B4513]" />
             )}
           </button>
 
           {isAdminRoute && (
             <button
               onClick={onExitAdmin}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#26221E] text-xs font-bold text-[#D2B48C] hover:bg-[#3D352E] transition-colors border border-[#3D352E] shadow-xs cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-[#F5F2EA] dark:bg-[#26221E] text-xs font-bold text-[#8B4513] dark:text-[#D2B48C] hover:bg-[#E8E2D2] dark:hover:bg-[#3D352E] transition-colors border border-[#E8E2D2] dark:border-[#3D352E] shadow-xs cursor-pointer"
               title="Exit Admin to Customer View"
             >
               <span>Exit Admin</span>

@@ -6,6 +6,7 @@ import { dataService } from './services/dataService';
 import { Booking, AdminRole } from './types';
 import { LOGO_BASE64 } from './components/logoBase64';
 import { APP_VERSION } from './version';
+import { getInitialTheme, getTimeBasedDefaultTheme } from './utils/theme';
 
 function safeLazy<T extends React.ComponentType<any>>(importFunc: () => Promise<{ default: T }>): React.LazyExoticComponent<T> {
   return lazy(() => 
@@ -99,10 +100,41 @@ export default function App() {
     return (sessionStorage.getItem('just_dosa_mode_choice') as 'customer' | null) || null;
   });
 
-  const isDarkMode = true;
+  const [theme, setTheme] = useState<'light' | 'dark'>(getInitialTheme);
+  const isDarkMode = theme === 'dark';
   const [unreadCount, setUnreadCount] = useState(0);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [updateAvailable, setUpdateAvailable] = useState(false);
+
+  // Sync theme with HTML document class
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [theme]);
+
+  // Periodic check for automatic time-based theme (when no manual override is active)
+  useEffect(() => {
+    const checkAutoTheme = () => {
+      const override = localStorage.getItem('just_dosa_user_override_theme');
+      if (!override) {
+        const autoTheme = getTimeBasedDefaultTheme();
+        setTheme(autoTheme);
+      }
+    };
+
+    checkAutoTheme();
+    const interval = setInterval(checkAutoTheme, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleToggleTheme = () => {
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(nextTheme);
+    localStorage.setItem('just_dosa_user_override_theme', nextTheme);
+  };
 
   useEffect(() => {
     if (isCustomerOnly || !isAdminRoute) {
@@ -148,9 +180,6 @@ export default function App() {
   }, [isAdminRoute, isCustomerOnly]);
 
   useEffect(() => {
-    // Set dark mode class on html/body
-    document.documentElement.classList.add('dark');
-
     const updateUnread = () => {
       const bookings: Booking[] = dataService.getBookings();
       const count = bookings.filter((b) => b.isNewAlert && (b.status === 'waiting' || b.status === 'booked')).length;
@@ -339,7 +368,7 @@ export default function App() {
   const isModeChoiceActive = !isCustomerOnly && !isAdminRoute && !showStaffChoice && modeChoice !== 'customer';
 
   return (
-    <div className="min-h-screen font-sans antialiased bg-[#1C1917] text-[#FDFBF7]">
+    <div className="min-h-screen font-sans antialiased bg-[#FDFBF7] dark:bg-[#1C1917] text-[#2D2926] dark:text-[#FDFBF7] transition-colors duration-200">
       {/* Top Navbar */}
       {!isModeChoiceActive && (
         <Navbar
@@ -348,6 +377,8 @@ export default function App() {
           onExitAdmin={handleExitAdmin}
           unreadCount={unreadCount}
           onGoToModeChoice={!isCustomerOnly ? handleGoToModeChoice : undefined}
+          isDark={isDarkMode}
+          onToggleTheme={handleToggleTheme}
         />
       )}
 
@@ -361,8 +392,8 @@ export default function App() {
       {/* Main View Display */}
       <main>
         {isModeChoiceActive ? (
-          <div className="min-h-screen flex items-center justify-center px-4 sm:px-6 lg:px-8 bg-[#1C1917]">
-            <div className="w-full max-w-md p-8 rounded-3xl bg-[#2D2926] border border-[#E8E2D2]/10 shadow-2xl text-center space-y-8 animate-fade-in">
+          <div className="min-h-screen flex items-center justify-center px-4 sm:px-6 lg:px-8 bg-[#F5F2EA] dark:bg-[#1C1917] transition-colors duration-200">
+            <div className="w-full max-w-md p-8 rounded-3xl bg-white dark:bg-[#2D2926] border border-[#E8E2D2] dark:border-[#E8E2D2]/10 shadow-2xl text-center space-y-8 animate-fade-in transition-colors duration-200">
               {/* Branding */}
               <div className="space-y-4">
                 <div className="w-36 h-36 mx-auto flex items-center justify-center bg-transparent shrink-0 select-none relative">
@@ -373,17 +404,17 @@ export default function App() {
                   <span className="inline-block px-3 py-1 rounded-md bg-[#E37A08]/10 text-[#E37A08] border border-[#E37A08]/20 text-xs font-bold uppercase tracking-widest mb-3">
                     Mill Park • Melbourne
                   </span>
-                  <h1 className="font-serif text-3xl sm:text-4xl font-bold text-white tracking-tight">
+                  <h1 className="font-serif text-3xl sm:text-4xl font-bold text-[#2D2926] dark:text-white tracking-tight">
                     Just Dosa
                   </h1>
-                  <p className="text-xs text-[#B8ACA0] uppercase tracking-widest font-semibold mt-1">
+                  <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-widest font-semibold mt-1">
                     Authentic South Indian
                   </p>
                 </div>
               </div>
 
               {/* Message */}
-              <div className="text-sm text-[#B8ACA0] leading-relaxed max-w-xs mx-auto">
+              <div className="text-sm text-[#6B5E4C] dark:text-[#B8ACA0] leading-relaxed max-w-xs mx-auto">
                 Welcome to Just Dosa Mill Park. Please select a mode to enter the terminal.
               </div>
 
@@ -408,7 +439,7 @@ export default function App() {
                     setPathname('/');
                     setHash('#/admin');
                   }}
-                  className="w-full py-4.5 px-6 rounded-xl bg-transparent hover:bg-white/5 text-[#B8ACA0] hover:text-white font-bold text-base border border-[#E8E2D2]/10 transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
+                  className="w-full py-4.5 px-6 rounded-xl bg-transparent hover:bg-black/5 dark:hover:bg-white/5 text-[#6B5E4C] hover:text-[#2D2926] dark:text-[#B8ACA0] dark:hover:text-white font-bold text-base border border-[#E8E2D2] dark:border-[#E8E2D2]/10 transition-all active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2"
                 >
                   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -419,8 +450,8 @@ export default function App() {
             </div>
           </div>
         ) : showStaffChoice && !isAdminRoute ? (
-          <div className="min-h-[80vh] flex items-center justify-center px-4 sm:px-6 lg:px-8 bg-[#1C1917]">
-            <div className="w-full max-w-md p-8 rounded-3xl bg-[#2D2926] border border-[#E8E2D2]/10 shadow-2xl text-center space-y-6 animate-fade-in">
+          <div className="min-h-[80vh] flex items-center justify-center px-4 sm:px-6 lg:px-8 bg-[#F5F2EA] dark:bg-[#1C1917] transition-colors duration-200">
+            <div className="w-full max-w-md p-8 rounded-3xl bg-white dark:bg-[#2D2926] border border-[#E8E2D2] dark:border-[#E8E2D2]/10 shadow-2xl text-center space-y-6 animate-fade-in transition-colors duration-200">
               <div className="w-16 h-16 bg-[#E37A08]/10 rounded-full flex items-center justify-center mx-auto text-[#E37A08]">
                 <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />

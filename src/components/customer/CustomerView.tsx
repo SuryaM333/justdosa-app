@@ -8,6 +8,8 @@ import { formatAusMobile, isValidAusMobile, cleanPhoneNumber, getWhatsAppUrl } f
 import { formatPartyBreakdown } from '../../utils/bookingUtils';
 import { safeFormatValidUntil } from '../../utils/dateUtils';
 import { SignatureDishShowcase } from './SignatureDishShowcase';
+import { CustomerAutoSuggest } from '../CustomerAutoSuggest';
+import { CustomerSuggestion } from '../../services/dataService';
 import { LOGO_BASE64 } from '../logoBase64';
 import { TimeWheelPicker, getAvailableTimeSlotsShared } from '../TimeWheelPicker';
 import { QuickNotesSelector } from '../QuickNotesSelector';
@@ -74,6 +76,15 @@ export const CustomerView: React.FC = () => {
   const [childrenCount, setChildrenCount] = useState(0);
   const [childrenHighChairs, setChildrenHighChairs] = useState<boolean[]>([]);
   const [whatsappOptIn, setWhatsappOptIn] = useState(false);
+  const [activeSuggestField, setActiveSuggestField] = useState<'phone' | 'firstName' | null>(null);
+
+  const handleSelectCustomerSuggestion = (suggestion: CustomerSuggestion) => {
+    setPhone(suggestion.phone);
+    if (suggestion.firstName) setFirstName(suggestion.firstName);
+    if (suggestion.lastName) setLastName(suggestion.lastName);
+    if (typeof suggestion.whatsappOptIn === 'boolean') setWhatsappOptIn(suggestion.whatsappOptIn);
+    setActiveSuggestField(null);
+  };
   const [bookingDate, setBookingDate] = useState(() => {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -1228,7 +1239,7 @@ export const CustomerView: React.FC = () => {
           <form onSubmit={handleSubmit} className="space-y-5">
             {/* Name Fields */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
+              <div className="relative">
                 <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
                   First Name *
                 </label>
@@ -1237,9 +1248,20 @@ export const CustomerView: React.FC = () => {
                   required
                   placeholder="e.g. Chandra Bharath"
                   value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
+                  onChange={(e) => {
+                    setFirstName(e.target.value);
+                    setActiveSuggestField('firstName');
+                  }}
+                  onFocus={() => setActiveSuggestField('firstName')}
                   className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
                 />
+                {activeSuggestField === 'firstName' && (
+                  <CustomerAutoSuggest
+                    query={firstName}
+                    onSelect={handleSelectCustomerSuggestion}
+                    onClose={() => setActiveSuggestField(null)}
+                  />
+                )}
               </div>
               <div>
                 <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
@@ -1257,7 +1279,7 @@ export const CustomerView: React.FC = () => {
             </div>
 
             {/* Phone Number with validation hint */}
-            <div>
+            <div className="relative">
               <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5 flex justify-between">
                 <span>Phone Number *</span>
                 <span className="text-[10px] text-[#A1917B] font-normal">Aus Mobile (04XX XXX XXX)</span>
@@ -1271,10 +1293,21 @@ export const CustomerView: React.FC = () => {
                   required
                   placeholder="0412 345 678"
                   value={phone}
-                  onChange={handlePhoneChange}
+                  onChange={(e) => {
+                    handlePhoneChange(e);
+                    setActiveSuggestField('phone');
+                  }}
+                  onFocus={() => setActiveSuggestField('phone')}
                   className="w-full pl-10 pr-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] font-mono transition-all"
                 />
               </div>
+              {activeSuggestField === 'phone' && (
+                <CustomerAutoSuggest
+                  query={phone}
+                  onSelect={handleSelectCustomerSuggestion}
+                  onClose={() => setActiveSuggestField(null)}
+                />
+              )}
             </div>
 
             {/* Date & Time Pickers for Remote Booking */}
@@ -1284,6 +1317,33 @@ export const CustomerView: React.FC = () => {
                 animate={{ opacity: 1, height: 'auto' }}
                 className="space-y-4 pt-2 border-t border-[#E8E2D2] dark:border-[#3D352E]"
               >
+                {/* Live Firestore Seat Availability Indicator */}
+                {(() => {
+                  const liveStats = dataService.getLiveSeatAvailability(bookingDate, bookingTime);
+                  return (
+                    <div className="bg-[#26221E] border border-[#E37A08]/40 rounded-2xl p-3.5 shadow-xs flex items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2.5">
+                        <span className="relative flex h-2.5 w-2.5 shrink-0">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                        </span>
+                        <div className="text-left">
+                          <span className="font-bold text-white block text-xs">
+                            Live Table & Seat Availability
+                          </span>
+                          <span className="text-[#B8ACA0] text-[11px]">
+                            {bookingTime ? `Slot ${bookingTime}: ` : 'Current Floor: '} 
+                            <strong className="text-emerald-400 font-bold">{liveStats.vacantTables} of {liveStats.totalTables} tables vacant</strong> ({liveStats.availableSeats} seats open)
+                          </span>
+                        </div>
+                      </div>
+                      <span className="px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 font-bold text-[10px] uppercase tracking-wider shrink-0 border border-emerald-500/20">
+                        Synced Live
+                      </span>
+                    </div>
+                  );
+                })()}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
@@ -1409,6 +1469,60 @@ export const CustomerView: React.FC = () => {
                                       {formattedPhone}
                                     </a>
                                   </p>
+                                </div>
+                              </div>
+
+                              {/* Live Slot Availability List */}
+                              <div className="space-y-2 pt-2 border-t border-[#E8E2D2] dark:border-[#3D352E]">
+                                <div className="flex items-center justify-between text-xs font-bold text-[#8B4513] dark:text-[#D2B48C]">
+                                  <span className="flex items-center gap-1">
+                                    <Clock className="w-3.5 h-3.5 text-[#E37A08]" />
+                                    Live Saturday Slot Availability
+                                  </span>
+                                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-semibold">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                    Synced Live
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-2">
+                                  {dataService.getKalyanaLiveAvailability(bookingDate).map((slotInfo) => (
+                                    <div 
+                                      key={slotInfo.slotId}
+                                      className={`p-2.5 rounded-xl border text-xs flex items-center justify-between transition-all ${
+                                        slotInfo.isClosed 
+                                          ? 'bg-zinc-100 dark:bg-zinc-800/40 border-zinc-200 dark:border-zinc-700/50 opacity-75'
+                                          : slotInfo.availableSeats === 0
+                                          ? 'bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-800/40'
+                                          : 'bg-[#FDFBF7] dark:bg-[#1C1917] border-[#E8E2D2] dark:border-[#3D352E]'
+                                      }`}
+                                    >
+                                      <div>
+                                        <span className="font-bold text-[#2D2926] dark:text-white block">
+                                          {slotInfo.range}
+                                        </span>
+                                        <span className="text-[10px] text-[#8B4513]/70 dark:text-[#D2B48C]/70 block">
+                                          Booking Cutoff: {slotInfo.cutoffTimeStr}
+                                        </span>
+                                      </div>
+
+                                      <div className="text-right shrink-0">
+                                        {slotInfo.isClosed ? (
+                                          <span className="px-2 py-0.5 rounded-full bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-300 font-bold text-[10px]">
+                                            Booking Closed
+                                          </span>
+                                        ) : slotInfo.availableSeats === 0 ? (
+                                          <span className="px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-700 dark:text-rose-400 font-bold text-[10px]">
+                                            Fully Booked
+                                          </span>
+                                        ) : (
+                                          <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 font-extrabold text-[11px]">
+                                            ~{slotInfo.availableSeats} seats free
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
                                 </div>
                               </div>
 

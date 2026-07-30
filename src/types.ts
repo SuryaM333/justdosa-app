@@ -60,23 +60,37 @@ export interface Booking {
   reminderSent?: boolean;
 }
 
+export interface CanvasPosition {
+  x?: number; // percentage (0 - 100) on canvas
+  y?: number; // percentage (0 - 100) on canvas
+  width?: number; // percentage width on canvas (e.g. 18%)
+  height?: number; // percentage height on canvas (e.g. 16%)
+  rotation?: number; // degrees (0, 45, 90)
+  column?: 'left' | 'middle' | 'right' | 'top';
+  order?: number;
+  isDiamond?: boolean;
+}
+
 export interface Table {
   id: number;
   name: string;
-  capacity: number; // 2 or 6
-  maxOverrideCapacity: number; // For tables 5 & 6, can be overridden to 3
+  capacity: number; // 2, 4, 6, etc.
+  maxOverrideCapacity: number;
   isOccupied: boolean;
-  isInactive: boolean; // Table 7 is inactive
+  isInactive: boolean;
   currentBookingId?: string;
-  orderingUrl?: string; // For table QR ordering handoff
+  orderingUrl?: string;
   branchId?: string;
   assignedServer?: string;
   mergedWith?: number;
-  position: {
-    column: 'left' | 'middle' | 'right' | 'top';
-    order: number;
-    isDiamond?: boolean;
-  };
+  extraSeats?: number;
+  x?: number; // free canvas percentage X (0-100)
+  y?: number; // free canvas percentage Y (0-100)
+  width?: number; // free canvas percentage width
+  height?: number; // free canvas percentage height
+  rotation?: number;
+  shape?: 'rectangle' | 'diamond' | 'circle';
+  position?: CanvasPosition;
 }
 
 export interface DailyStats {
@@ -88,12 +102,25 @@ export interface DailyStats {
 }
 
 export interface LandmarkPosition {
-  id: 'door' | 'washroom' | 'kitchen' | 'counter' | string;
+  id: string;
   name: string;
-  position: {
+  x?: number; // percentage X (0-100)
+  y?: number; // percentage Y (0-100)
+  width?: number; // percentage width (e.g. 16%)
+  height?: number; // percentage height (e.g. 10%)
+  type?: 'door' | 'washroom' | 'kitchen' | 'counter' | 'bar' | 'pos' | 'waiting' | 'custom';
+  position?: {
     column: 'left' | 'middle' | 'right' | 'top';
     order: number;
   };
+}
+
+export interface FloorCanvasSettings {
+  aspectRatio: '16:9' | '4:3' | '1:1' | '2:1' | 'custom';
+  widthMeters: number;
+  heightMeters: number;
+  gridSnapEnabled: boolean;
+  gridSizePercent: number; // e.g. 2.5%
 }
 
 export type AdminTab = 'waiting' | 'booked' | 'seated' | 'customers' | 'summary' | 'settings';

@@ -55,17 +55,17 @@ export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRef
       });
   }, [bookings, dateFilter]);
 
-  // Identify overlaps
+  // Identify table conflicts ONLY when the SAME physical table is allocated to two active bookings for the same date & time
   const overlapSet = new Set<string>();
-  const timeMap: Record<string, string[]> = {};
+  const tableTimeMap: Record<string, string[]> = {};
   remoteBookings.forEach((b) => {
-    if (b.status !== 'cancelled' && b.status !== 'declined') {
-      const key = `${b.bookingDate}_${b.bookingTime}`;
-      if (!timeMap[key]) timeMap[key] = [];
-      timeMap[key].push(b.id);
+    if (b.status !== 'cancelled' && b.status !== 'declined' && b.tableId) {
+      const key = `${b.tableId}_${b.bookingDate}_${b.bookingTime}`;
+      if (!tableTimeMap[key]) tableTimeMap[key] = [];
+      tableTimeMap[key].push(b.id);
     }
   });
-  Object.values(timeMap).forEach((ids) => {
+  Object.values(tableTimeMap).forEach((ids) => {
     if (ids.length > 1) {
       ids.forEach((id) => overlapSet.add(id));
     }
@@ -414,7 +414,7 @@ export const BookedTab: React.FC<BookedTabProps> = ({ bookings, customers, onRef
                         {isOverlap && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500 text-white text-[10px] font-black animate-pulse shadow-sm">
                             <AlertTriangle className="w-3 h-3" />
-                            <span>OVERLAP DETECTED</span>
+                            <span>SAME TABLE CONFLICT</span>
                           </span>
                         )}
                       </div>

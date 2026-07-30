@@ -7,6 +7,8 @@ import { getRequiredTableSeats } from '../../utils/bookingUtils';
 import { formatAusMobile, cleanPhoneNumber, isValidAusMobile } from '../../utils/phone';
 import { TimeWheelPicker, getAvailableTimeSlotsShared } from '../TimeWheelPicker';
 import { QuickNotesSelector } from '../QuickNotesSelector';
+import { CustomerAutoSuggest } from '../CustomerAutoSuggest';
+import { CustomerSuggestion } from '../../services/dataService';
 
 interface NewBookingModalProps {
   isOpen: boolean;
@@ -47,6 +49,19 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [allergies, setAllergies] = useState('');
   const [notes, setNotes] = useState('');
+  const [activeSuggestField, setActiveSuggestField] = useState<'phone' | 'firstName' | null>(null);
+  const [showCutoffOverrideModal, setShowCutoffOverrideModal] = useState(false);
+  const [overrideCutoff, setOverrideCutoff] = useState(false);
+
+  const handleSelectCustomerSuggestion = (suggestion: CustomerSuggestion) => {
+    setPhone(suggestion.phone);
+    if (suggestion.firstName) setFirstName(suggestion.firstName);
+    if (suggestion.lastName) setLastName(suggestion.lastName);
+    if (suggestion.allergies) setAllergies(suggestion.allergies);
+    if (suggestion.notes) setNotes(suggestion.notes);
+    if (typeof suggestion.whatsappOptIn === 'boolean') setWhatsappOptIn(suggestion.whatsappOptIn);
+    setActiveSuggestField(null);
+  };
 
   // Search existing customer based on entered phone
   const cleanedPhone = cleanPhoneNumber(phone);
@@ -141,6 +156,12 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
     const isKalyana = !isWaitlist && day === 6 && saturdayMenuType === 'kalyana';
 
     if (isKalyana) {
+      const liveInfo = dataService.getKalyanaLiveAvailability(bookingDate).find(s => s.range === kalyanaSlot || s.slotId === kalyanaSlot);
+      if (liveInfo?.isClosed && !overrideCutoff) {
+        setShowCutoffOverrideModal(true);
+        return;
+      }
+
       const guestsInSlot = getSlotGuestsCount(kalyanaSlot);
       const capacity = dataService.getKalyanaCapacity();
       if (guestsInSlot + totalGuests > capacity) {
@@ -275,7 +296,7 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
 
             {/* Basic Info */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
+              <div className="relative">
                 <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
                   First Name *
                 </label>
@@ -284,9 +305,20 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
                   required
                   placeholder="e.g. Priya"
                   value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
+                  onChange={(e) => {
+                    setFirstName(e.target.value);
+                    setActiveSuggestField('firstName');
+                  }}
+                  onFocus={() => setActiveSuggestField('firstName')}
                   className="w-full px-4 py-2.5 rounded-xl bg-white dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-sm text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
                 />
+                {activeSuggestField === 'firstName' && (
+                  <CustomerAutoSuggest
+                    query={firstName}
+                    onSelect={handleSelectCustomerSuggestion}
+                    onClose={() => setActiveSuggestField(null)}
+                  />
+                )}
               </div>
 
               <div>
@@ -304,7 +336,7 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
             </div>
 
             {/* Phone Number with autolink message */}
-            <div>
+            <div className="relative">
               <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
                 Phone Number
               </label>
@@ -314,10 +346,21 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
                   type="tel"
                   placeholder="e.g. 0412 345 678 (Optional)"
                   value={phone}
-                  onChange={(e) => setPhone(formatAusMobile(e.target.value))}
+                  onChange={(e) => {
+                    setPhone(formatAusMobile(e.target.value));
+                    setActiveSuggestField('phone');
+                  }}
+                  onFocus={() => setActiveSuggestField('phone')}
                   className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-white dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-sm text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
                 />
               </div>
+              {activeSuggestField === 'phone' && (
+                <CustomerAutoSuggest
+                  query={phone}
+                  onSelect={handleSelectCustomerSuggestion}
+                  onClose={() => setActiveSuggestField(null)}
+                />
+              )}
               {matchedCustomer && getCustomerBadgeText(matchedCustomer)}
             </div>
 
@@ -525,9 +568,12 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
                         <div className="space-y-2">
                           {dataService.getKalyanaSlots().map((slotObj) => {
                             const slot = slotObj.range;
+                            const liveAvailability = dataService.getKalyanaLiveAvailability(bookingDate);
+                            const liveInfo = liveAvailability.find(s => s.range === slot || s.slotId === slotObj.id);
+
                             const guestsInSlot = getSlotGuestsCount(slot);
                             const capacity = slotObj.capacity;
-                            const available = capacity - guestsInSlot;
+                            const available = liveInfo ? liveInfo.availableSeats : capacity - guestsInSlot;
                             const totalGuests = adultsCount + childrenCount;
                             const isFull = available <= 0;
                             const cannotFit = totalGuests > available;
@@ -538,34 +584,51 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
                                 type="button"
                                 disabled={isFull || cannotFit}
                                 onClick={() => setKalyanaSlot(slot)}
-                                className={`w-full p-2.5 rounded-xl border-2 text-left flex items-center justify-between transition-all ${
+                                className={`w-full p-3 rounded-xl border-2 text-left flex items-start justify-between transition-all ${
                                   kalyanaSlot === slot
                                     ? 'border-[#E37A08] bg-white dark:bg-[#26221E] shadow-sm'
                                     : 'border-[#E8E2D2]/60 dark:border-[#3D352E]/60 bg-white/50 dark:bg-[#26221E]/30 disabled:opacity-40 disabled:cursor-not-allowed'
                                 }`}
                               >
-                                <div>
-                                  <span className="font-serif font-bold text-xs text-[#2D2926] dark:text-white block">
-                                    {slot}
-                                  </span>
-                                  <span className="text-[10px] text-[#6B5E4C] dark:text-[#B8ACA0]">
+                                <div className="space-y-0.5">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-serif font-bold text-xs text-[#2D2926] dark:text-white block">
+                                      {slot}
+                                    </span>
+                                    {liveInfo?.isClosed && (
+                                      <span className="px-1.5 py-0.2 bg-amber-500/15 text-amber-700 dark:text-amber-400 text-[9px] font-bold rounded">
+                                        Cutoff Passed
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <span className="text-[10px] text-[#6B5E4C] dark:text-[#B8ACA0] block">
                                     {isFull 
                                       ? 'Fully Booked' 
                                       : cannotFit 
                                       ? `Needs ${totalGuests} seats, only ${available} left`
-                                      : `${available} of ${capacity} seats remaining`
+                                      : `${available} of ${capacity} seats open`
                                     }
                                   </span>
+
+                                  {liveInfo && liveInfo.freeTablesSummary && (
+                                    <span className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 font-semibold block pt-0.5">
+                                      📍 {liveInfo.freeTablesSummary}
+                                    </span>
+                                  )}
                                 </div>
-                                {isFull ? (
-                                  <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-600">
-                                    Full
-                                  </span>
-                                ) : kalyanaSlot === slot ? (
-                                  <span className="w-4 h-4 rounded-full bg-[#E37A08] flex items-center justify-center text-white text-[10px] font-bold">
-                                    ✓
-                                  </span>
-                                ) : null}
+
+                                <div className="shrink-0 pt-0.5">
+                                  {isFull ? (
+                                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-600">
+                                      Full
+                                    </span>
+                                  ) : kalyanaSlot === slot ? (
+                                    <span className="w-4 h-4 rounded-full bg-[#E37A08] flex items-center justify-center text-white text-[10px] font-bold">
+                                      ✓
+                                    </span>
+                                  ) : null}
+                                </div>
                               </button>
                             );
                           })}
@@ -654,6 +717,56 @@ export const NewBookingModal: React.FC<NewBookingModalProps> = ({
           </form>
         </motion.div>
       </div>
+
+      {/* Cutoff Override Modal */}
+      <AnimatePresence>
+        {showCutoffOverrideModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xs z-60 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-[#1C1917] rounded-2xl p-6 max-w-md w-full space-y-4 border border-amber-500/30 shadow-2xl"
+            >
+              <div className="flex items-center gap-3 text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="w-6 h-6 shrink-0" />
+                <h3 className="font-serif font-bold text-base text-[#2D2926] dark:text-white">
+                  Cutoff Time Passed
+                </h3>
+              </div>
+
+              <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0] leading-relaxed">
+                The booking cutoff time for <strong>{kalyanaSlot}</strong> on <strong>{bookingDate}</strong> has already passed.
+                As staff, you can override this cutoff and proceed to create the booking.
+              </p>
+
+              <div className="flex justify-end gap-3 pt-3 border-t border-[#E8E2D2] dark:border-[#3D352E]">
+                <button
+                  type="button"
+                  onClick={() => setShowCutoffOverrideModal(false)}
+                  className="px-4 py-2 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCutoffOverrideModal(false);
+                    setOverrideCutoff(true);
+                    setTimeout(() => {
+                      const form = document.querySelector('form');
+                      if (form) form.requestSubmit();
+                    }, 50);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all shadow-sm"
+                >
+                  Override Cutoff & Create
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </AnimatePresence>
   );
 };
