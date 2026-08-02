@@ -82,7 +82,14 @@ export interface Table {
   orderingUrl?: string;
   branchId?: string;
   assignedServer?: string;
-  mergedWith?: number;
+  /** "grp-{primaryId}" — identical on every member doc of a merge group; absent when not merged. */
+  mergeGroupId?: string;
+  /** Full sorted member table ids (2 or 3), duplicated identically on every member doc, so a
+   *  Firestore transaction can resolve and re-validate the whole group from direct doc reads
+   *  with no query needed. */
+  mergeGroupTableIds?: number[];
+  /** +1/+2 chair override chosen at allocation time. Lives only on the group's primary (lowest id)
+   *  member when merged; combined capacity = sum(members' capacity) + primary's extraSeats. */
   extraSeats?: number;
   x?: number; // free canvas percentage X (0-100)
   y?: number; // free canvas percentage Y (0-100)

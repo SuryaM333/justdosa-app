@@ -7,9 +7,8 @@ import { doc, onSnapshot } from 'firebase/firestore';
 import { formatAusMobile, isValidAusMobile, cleanPhoneNumber, getWhatsAppUrl } from '../../utils/phone';
 import { formatPartyBreakdown } from '../../utils/bookingUtils';
 import { safeFormatValidUntil } from '../../utils/dateUtils';
+import { resolveGroupMembers, getGroupCombinedName, getGroupCombinedShortCode, getGroupCombinedOrderingUrl } from '../../utils/mergeUtils';
 import { SignatureDishShowcase } from './SignatureDishShowcase';
-import { CustomerAutoSuggest } from '../CustomerAutoSuggest';
-import { CustomerSuggestion } from '../../services/dataService';
 import { LOGO_BASE64 } from '../logoBase64';
 import { TimeWheelPicker, getAvailableTimeSlotsShared } from '../TimeWheelPicker';
 import { QuickNotesSelector } from '../QuickNotesSelector';
@@ -76,15 +75,6 @@ export const CustomerView: React.FC = () => {
   const [childrenCount, setChildrenCount] = useState(0);
   const [childrenHighChairs, setChildrenHighChairs] = useState<boolean[]>([]);
   const [whatsappOptIn, setWhatsappOptIn] = useState(false);
-  const [activeSuggestField, setActiveSuggestField] = useState<'phone' | 'firstName' | null>(null);
-
-  const handleSelectCustomerSuggestion = (suggestion: CustomerSuggestion) => {
-    setPhone(suggestion.phone);
-    if (suggestion.firstName) setFirstName(suggestion.firstName);
-    if (suggestion.lastName) setLastName(suggestion.lastName);
-    if (typeof suggestion.whatsappOptIn === 'boolean') setWhatsappOptIn(suggestion.whatsappOptIn);
-    setActiveSuggestField(null);
-  };
   const [bookingDate, setBookingDate] = useState(() => {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
@@ -435,8 +425,14 @@ export const CustomerView: React.FC = () => {
     const allocatedTable = activeBooking.tableId
       ? dataService.getTables().find((t) => t.id.toString() === activeBooking.tableId?.toString() || t.name === activeBooking.tableId?.toString())
       : null;
+    const tableGroup = allocatedTable ? resolveGroupMembers(allocatedTable, dataService.getTables()) : [];
+    const combinedTableName = allocatedTable ? getGroupCombinedName(tableGroup) : (activeBooking.tableId ? `Table ${activeBooking.tableId}` : '');
+    const tableNumberDisplay = allocatedTable ? getGroupCombinedShortCode(tableGroup).replace(/^T/, '') : (activeBooking.tableId?.toString() || '');
     const isNoOrderingTable = activeBooking.tableId?.toString() === '6' || activeBooking.tableId?.toString() === '7' || activeBooking.tableId?.toString() === 'Table 6' || activeBooking.tableId?.toString() === 'Table 7';
-    const orderingUrl = isNoOrderingTable ? '' : (allocatedTable?.orderingUrl || (activeBooking.tableId ? `https://justdosa.com.au/order/table-${activeBooking.tableId}` : null));
+    // A merged unit falls back to the next member's ordering URL if the
+    // allocated (primary) table doesn't have one set.
+    const groupOrderingUrl = allocatedTable ? getGroupCombinedOrderingUrl(tableGroup) : undefined;
+    const orderingUrl = isNoOrderingTable ? '' : (groupOrderingUrl || (activeBooking.tableId ? `https://justdosa.com.au/order/table-${activeBooking.tableId}` : null));
 
     return (
       <div className="min-h-[calc(100vh-4rem)] bg-[#1C1917] py-8 px-4 flex flex-col items-center justify-center">
@@ -527,14 +523,14 @@ export const CustomerView: React.FC = () => {
               <p className="text-sm text-[#B8ACA0] mb-6">
                 {dataService.getCustomerTexts().tableReadyTemplate
                   .replace(/{name}/g, activeBooking.firstName)
-                  .replace(/{table}/g, activeBooking.tableId?.toString() || '')}
+                  .replace(/{table}/g, tableNumberDisplay)}
               </p>
               <div className="my-6 bg-[#1C1917] border-2 border-[#3D352E] rounded-2xl p-6">
                 <p className="text-xs uppercase tracking-wider text-[#D2B48C] font-bold mb-1">
                   Please proceed to
                 </p>
                 <div className="text-4xl sm:text-5xl font-black text-[#22C55E] font-mono mb-4">
-                  Table {activeBooking.tableId}
+                  {combinedTableName}
                 </div>
 
                 {activeBooking.tableId && (
@@ -1248,20 +1244,9 @@ export const CustomerView: React.FC = () => {
                   required
                   placeholder="e.g. Chandra Bharath"
                   value={firstName}
-                  onChange={(e) => {
-                    setFirstName(e.target.value);
-                    setActiveSuggestField('firstName');
-                  }}
-                  onFocus={() => setActiveSuggestField('firstName')}
+                  onChange={(e) => setFirstName(e.target.value)}
                   className="w-full px-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] transition-all"
                 />
-                {activeSuggestField === 'firstName' && (
-                  <CustomerAutoSuggest
-                    query={firstName}
-                    onSelect={handleSelectCustomerSuggestion}
-                    onClose={() => setActiveSuggestField(null)}
-                  />
-                )}
               </div>
               <div>
                 <label className="block text-xs font-semibold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase tracking-wider mb-1.5">
@@ -1293,21 +1278,10 @@ export const CustomerView: React.FC = () => {
                   required
                   placeholder="0412 345 678"
                   value={phone}
-                  onChange={(e) => {
-                    handlePhoneChange(e);
-                    setActiveSuggestField('phone');
-                  }}
-                  onFocus={() => setActiveSuggestField('phone')}
+                  onChange={handlePhoneChange}
                   className="w-full pl-10 pr-4 py-3 rounded-xl bg-[#FDFBF7] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-[#E37A08] font-mono transition-all"
                 />
               </div>
-              {activeSuggestField === 'phone' && (
-                <CustomerAutoSuggest
-                  query={phone}
-                  onSelect={handleSelectCustomerSuggestion}
-                  onClose={() => setActiveSuggestField(null)}
-                />
-              )}
             </div>
 
             {/* Date & Time Pickers for Remote Booking */}

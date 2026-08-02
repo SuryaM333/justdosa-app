@@ -5,6 +5,7 @@ import { dataService } from '../../services/dataService';
 import { getWhatsAppUrl } from '../../utils/phone';
 import { formatPartyBreakdown } from '../../utils/bookingUtils';
 import { parseToDate, safeGetElapsedMs, safeFormatSeatedDuration } from '../../utils/dateUtils';
+import { resolveGroupMembers, getGroupCombinedName, getGroupCombinedShortCode, getGroupCombinedCapacity } from '../../utils/mergeUtils';
 
 interface SeatedTabProps {
   bookings: Booking[];
@@ -69,7 +70,9 @@ export const SeatedTab: React.FC<SeatedTabProps> = ({ bookings, tables, onRefres
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {seatedList.map((booking) => {
             const table = tables.find((t) => t.id === booking.tableId);
-            const waMsg = `Hi ${booking.firstName}, your table (Table ${booking.tableId}) at Just Dosa is ready! Please come to the host desk. 🥞🎉`;
+            const group = table ? resolveGroupMembers(table, tables) : [];
+            const combinedName = table ? getGroupCombinedName(group) : `Table ${booking.tableId}`;
+            const waMsg = `Hi ${booking.firstName}, your ${combinedName.toLowerCase()} at Just Dosa is ready! Please come to the host desk. 🥞🎉`;
             const waUrl = getWhatsAppUrl(booking.phone, waMsg);
 
             return (
@@ -81,7 +84,7 @@ export const SeatedTab: React.FC<SeatedTabProps> = ({ bookings, tables, onRefres
                   <div className="flex items-center justify-between pb-3 mb-3 border-b border-[#E8E2D2] dark:border-[#3D352E]">
                     <div className="flex items-center gap-2.5">
                       <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white font-bold flex items-center justify-center text-sm shadow-md shadow-emerald-600/20 font-mono">
-                        {booking.tableId ? `T${booking.tableId}` : 'T?'}
+                        {table ? getGroupCombinedShortCode(group) : (booking.tableId ? `T${booking.tableId}` : 'T?')}
                       </div>
                       <div>
                         <div className="flex items-center gap-1.5">
@@ -103,7 +106,7 @@ export const SeatedTab: React.FC<SeatedTabProps> = ({ bookings, tables, onRefres
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-[11px] text-[#6B5E4C] dark:text-[#B8ACA0] font-medium">
-                            {table ? table.name : `Table ${booking.tableId}`} ({table?.capacity || 6} seats)
+                            {table ? combinedName : `Table ${booking.tableId}`} ({table ? getGroupCombinedCapacity(group) : (table?.capacity || 6)} seats)
                           </span>
                           {booking.handledBy && (
                             <span className="text-[9px] uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-extrabold bg-emerald-500/10 px-1.5 py-0.5 rounded">

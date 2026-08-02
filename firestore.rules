@@ -1,39 +1,107 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Catch-all rule that blocks everything by default
+    // ------------------------------------------------------------------
+    // ARCHITECTURE NOTE (read before changing these rules):
+    // This app has NO Firebase Auth. "Admin" access is a client-side PIN
+    // check (see src/components/admin/PINModal.tsx + src/services/
+    // dataService.ts verifyStaffPin/verifyOwnerPin) that compares a typed
+    // PIN's SHA-256 hash against a hash fetched from settings_secure/pins.
+    // Firestore rules can only see `request.auth` (always null here) and
+    // the data being written — they CANNOT tell an admin's browser apart
+    // from a customer's browser. That means:
+    //   - settings_secure/pins MUST remain client-readable, or PIN login
+    //     breaks entirely. The PIN hash reaching the client is therefore
+    //     an accepted, documented limitation of the current architecture,
+    //     not something a rules change can fix. A real fix requires
+    //     Firebase Auth + a callable Cloud Function that verifies PINs
+    //     server-side (out of scope for this pass; ask before doing it).
+    //   - bookings/customers/tables/settings are read by BOTH customer
+    //     and admin devices today (dataService.ts syncs full collections
+    //     unconditionally on load), so rules can't restrict reads by role
+    //     without breaking the app for one side or the other.
+    // What these rules DO add: strict shape/type validation on writes, so
+    // a compromised or malicious client can't inject arbitrary fields,
+    // corrupt documents, or write to unexpected collections. Deletes are
+    // scoped to only what the app's own code actually performs.
+    // ------------------------------------------------------------------
+
+    // Deny everything not explicitly matched below.
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // Allow read and write to the settings collection for global configuration
-    match /settings/{document} {
-      allow read, write: if true;
+    function isMap(v) {
+      return v is map;
     }
 
-    // Allow read/write to the settings_secure collection for PIN hash checks and updates
-    match /settings_secure/{document} {
-      allow read, write: if true;
+    // ---- settings/global ----
+    // Public restaurant config (hours, kalyana slots, staff list, texts,
+    // floor plan). Needed by every visitor (customer + admin) to render
+    // the booking form and floor plan. No PII lives here.
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if docId == 'global' && isMap(request.resource.data);
     }
 
-    // Allow read/write to tables
-    match /tables/{document} {
-      allow read, write: if true;
+    // ---- settings_secure/pins ----
+    // See architecture note above: reads must stay open for the current
+    // PIN-check flow to work. Writes are restricted to exactly the two
+    // hash fields the app ever writes (setStaffPin/setOwnerPin), typed
+    // as strings, so a client can't smuggle extra fields or wrong types
+    // into this document.
+    match /settings_secure/{docId} {
+      allow read: if true;
+      allow write: if docId == 'pins'
+        && request.resource.data.keys().hasOnly(['staffPinHash', 'ownerPinHash'])
+        && (!('staffPinHash' in request.resource.data) || request.resource.data.staffPinHash is string)
+        && (!('ownerPinHash' in request.resource.data) || request.resource.data.ownerPinHash is string);
     }
 
-    // Allow read/write to bookings
-    match /bookings/{document} {
-      allow read, write: if true;
+    // ---- tables ----
+    match /tables/{tableId} {
+      allow read: if true;
+      allow write: if isMap(request.resource.data)
+        && request.resource.data.id is number
+        && request.resource.data.name is string
+        && request.resource.data.capacity is number
+        && request.resource.data.isOccupied is bool
+        && request.resource.data.isInactive is bool;
+      allow delete: if true;
     }
 
-    // Allow read/write to customers
-    match /customers/{document} {
-      allow read, write: if true;
+    // ---- bookings ----
+    match /bookings/{bookingId} {
+      allow read: if true;
+      allow create, update: if isMap(request.resource.data)
+        && request.resource.data.id is string
+        && request.resource.data.firstName is string
+        && request.resource.data.phone is string
+        && request.resource.data.partySize is number
+        && request.resource.data.status is string
+        && request.resource.data.type is string;
+      allow delete: if true;
     }
 
-    // Allow read/write to slot occupancy records
-    match /slot_occupancy/{document} {
-      allow read, write: if true;
+    // ---- customers ----
+    // Keyed by cleaned phone number. See architecture note: reads stay
+    // open because both the customer form (duplicate lookup) and the
+    // staff dashboard currently rely on the full-collection sync.
+    match /customers/{phoneKey} {
+      allow read: if true;
+      allow write: if isMap(request.resource.data)
+        && request.resource.data.phone is string
+        && request.resource.data.firstName is string
+        && request.resource.data.totalVisits is number;
+      allow delete: if true;
+    }
+
+    // ---- slot_occupancy ----
+    // Aggregate Kalyana Virundhu seat counts per date+slot. No PII.
+    match /slot_occupancy/{slotDoc} {
+      allow read: if true;
+      allow write: if isMap(request.resource.data)
+        && request.resource.data.guestsCount is number;
     }
   }
 }

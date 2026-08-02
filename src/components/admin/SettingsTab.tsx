@@ -18,7 +18,9 @@ import {
   Info,
   Phone,
   Palette,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { dataService } from '../../services/dataService';
 import { Table, LandmarkPosition } from '../../types';
@@ -28,8 +30,17 @@ export const SettingsTab: React.FC = () => {
   const [activeSubTab, setActiveSubTab] = useState<'hours' | 'kalyana' | 'tables' | 'texts' | 'appearance' | 'security' | 'device'>('hours');
 
   // Form states initialized with live data from dataService
+  // PIN change: leaving new/current/retype all blank keeps the existing PIN.
+  // Typing a new PIN requires the current PIN (verified against the real
+  // hash via dataService.verifyStaffPin/verifyOwnerPin) and a matching retype.
   const [staffPin, setStaffPin] = useState('');
+  const [currentStaffPin, setCurrentStaffPin] = useState('');
+  const [retypeStaffPin, setRetypeStaffPin] = useState('');
+  const [showNewStaffPin, setShowNewStaffPin] = useState(false);
   const [ownerPin, setOwnerPin] = useState('');
+  const [currentOwnerPin, setCurrentOwnerPin] = useState('');
+  const [retypeOwnerPin, setRetypeOwnerPin] = useState('');
+  const [showNewOwnerPin, setShowNewOwnerPin] = useState(false);
   const [whatsappNumber, setWhatsappNumber] = useState(() => dataService.getWhatsAppNumber());
   const [lunchBuffer, setLunchBuffer] = useState(() => dataService.getLunchBuffer().toString());
   const [dinnerBuffer, setDinnerBuffer] = useState(() => dataService.getDinnerBuffer().toString());
@@ -120,13 +131,39 @@ export const SettingsTab: React.FC = () => {
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
   };
 
-  const validateAll = (): string | null => {
-    // 1. PINs (4-6 digits, numeric, if provided)
-    if (staffPin && (staffPin.length < 4 || staffPin.length > 6 || !/^\d+$/.test(staffPin))) {
-      return 'Staff PIN must be between 4 and 6 numeric digits.';
+  const validateAll = async (): Promise<string | null> => {
+    // 1. PINs (4-6 digits, numeric, if provided). Changing a PIN requires the
+    // real current PIN (verified against its stored hash) plus a matching
+    // retype of the new PIN — leaving all three blank keeps it unchanged.
+    if (staffPin) {
+      if (staffPin.length < 4 || staffPin.length > 6 || !/^\d+$/.test(staffPin)) {
+        return 'Staff PIN must be between 4 and 6 numeric digits.';
+      }
+      if (!currentStaffPin) {
+        return 'Enter the current Staff PIN to change it.';
+      }
+      if (staffPin !== retypeStaffPin) {
+        return 'New Staff PIN and retyped PIN do not match.';
+      }
+      const currentStaffPinOk = await dataService.verifyStaffPin(currentStaffPin);
+      if (!currentStaffPinOk) {
+        return 'Current Staff PIN is incorrect.';
+      }
     }
-    if (ownerPin && (ownerPin.length < 4 || ownerPin.length > 6 || !/^\d+$/.test(ownerPin))) {
-      return 'Manager/Founder PIN must be between 4 and 6 numeric digits.';
+    if (ownerPin) {
+      if (ownerPin.length < 4 || ownerPin.length > 6 || !/^\d+$/.test(ownerPin)) {
+        return 'Manager/Founder PIN must be between 4 and 6 numeric digits.';
+      }
+      if (!currentOwnerPin) {
+        return 'Enter the current Manager/Founder PIN to change it.';
+      }
+      if (ownerPin !== retypeOwnerPin) {
+        return 'New Manager/Founder PIN and retyped PIN do not match.';
+      }
+      const currentOwnerPinOk = await dataService.verifyOwnerPin(currentOwnerPin);
+      if (!currentOwnerPinOk) {
+        return 'Current Manager/Founder PIN is incorrect.';
+      }
     }
 
     // 2. Buffers & Interval
@@ -203,10 +240,10 @@ export const SettingsTab: React.FC = () => {
     return null;
   };
 
-  const handlePreSave = (e: React.FormEvent) => {
+  const handlePreSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setValidationError(null);
-    const err = validateAll();
+    const err = await validateAll();
     if (err) {
       setValidationError(err);
       showToastMsg(err, 'error');
@@ -259,16 +296,24 @@ export const SettingsTab: React.FC = () => {
       await dataService.setLandmarks(landmarks);
       await dataService.setStaffList(staffList);
 
-      // If a new Staff PIN was typed, save its hash and clear input
+      // If a new Staff PIN was typed (and verified in validateAll), save its
+      // hash and clear all three fields.
       if (staffPin) {
         await dataService.setStaffPin(staffPin);
         setStaffPin('');
+        setCurrentStaffPin('');
+        setRetypeStaffPin('');
+        setShowNewStaffPin(false);
       }
 
-      // If a new Manager PIN was typed, save its hash and clear input
+      // If a new Manager PIN was typed (and verified in validateAll), save
+      // its hash and clear all three fields.
       if (ownerPin) {
         await dataService.setOwnerPin(ownerPin);
         setOwnerPin('');
+        setCurrentOwnerPin('');
+        setRetypeOwnerPin('');
+        setShowNewOwnerPin(false);
       }
 
       // 2. Save table configurations to Firestore
@@ -322,7 +367,13 @@ export const SettingsTab: React.FC = () => {
   const handleResetToDefaults = () => {
     if (window.confirm('Are you sure you want to reset ALL configurations to original system defaults? This will overwrite pins, hours, texts, and thresholds.')) {
       setStaffPin('1357');
+      setCurrentStaffPin('');
+      setRetypeStaffPin('1357');
+      setShowNewStaffPin(false);
       setOwnerPin('2468');
+      setCurrentOwnerPin('');
+      setRetypeOwnerPin('2468');
+      setShowNewOwnerPin(false);
       setWhatsappNumber('0412345678');
       setLunchBuffer('30');
       setDinnerBuffer('30');
@@ -1253,35 +1304,91 @@ export const SettingsTab: React.FC = () => {
 
                 {/* PIN Settings Panel */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 rounded-2xl border border-[#E8E2D2]/60 dark:border-[#3D352E]/60 bg-[#FDFBF7] dark:bg-[#1C1917]/30">
-                  <div className="space-y-1.5">
+                  <div className="space-y-2.5">
                     <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase">
                       Staff Service PIN (4-6 digits)
                     </label>
-                    <input 
-                      type="password"
-                      maxLength={6}
-                      value={staffPin}
-                      onChange={(e) => setStaffPin(e.target.value)}
-                      placeholder="•••• (Leave blank to keep current)"
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-sm font-mono text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
-                    />
+                    <div className="space-y-1.5">
+                      <input
+                        type="password"
+                        maxLength={6}
+                        value={currentStaffPin}
+                        onChange={(e) => setCurrentStaffPin(e.target.value)}
+                        placeholder="Current Staff PIN"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-sm font-mono text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
+                      />
+                      <div className="relative">
+                        <input
+                          type={showNewStaffPin ? 'text' : 'password'}
+                          maxLength={6}
+                          value={staffPin}
+                          onChange={(e) => setStaffPin(e.target.value)}
+                          placeholder="New Staff PIN (leave blank to keep current)"
+                          className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-sm font-mono text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowNewStaffPin(!showNewStaffPin)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6B5E4C] dark:text-[#B8ACA0] hover:text-[#E37A08]"
+                          title={showNewStaffPin ? 'Hide PIN' : 'Show PIN'}
+                        >
+                          {showNewStaffPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      <input
+                        type="password"
+                        maxLength={6}
+                        value={retypeStaffPin}
+                        onChange={(e) => setRetypeStaffPin(e.target.value)}
+                        placeholder="Retype New Staff PIN"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-sm font-mono text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
+                      />
+                    </div>
                     <span className="text-[10px] text-[#6B5E4C]/80 dark:text-[#B8ACA0]/80 block">
                       Grants daily floorsheet access, seating control, and waiting queue additions.
                     </span>
                   </div>
 
-                  <div className="space-y-1.5">
+                  <div className="space-y-2.5">
                     <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase">
                       Manager / Founder PIN (4-6 digits)
                     </label>
-                    <input 
-                      type="password"
-                      maxLength={6}
-                      value={ownerPin}
-                      onChange={(e) => setOwnerPin(e.target.value)}
-                      placeholder="•••• (Leave blank to keep current)"
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-sm font-mono text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
-                    />
+                    <div className="space-y-1.5">
+                      <input
+                        type="password"
+                        maxLength={6}
+                        value={currentOwnerPin}
+                        onChange={(e) => setCurrentOwnerPin(e.target.value)}
+                        placeholder="Current Manager/Founder PIN"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-sm font-mono text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
+                      />
+                      <div className="relative">
+                        <input
+                          type={showNewOwnerPin ? 'text' : 'password'}
+                          maxLength={6}
+                          value={ownerPin}
+                          onChange={(e) => setOwnerPin(e.target.value)}
+                          placeholder="New Manager/Founder PIN (leave blank to keep current)"
+                          className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-sm font-mono text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowNewOwnerPin(!showNewOwnerPin)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-[#6B5E4C] dark:text-[#B8ACA0] hover:text-[#E37A08]"
+                          title={showNewOwnerPin ? 'Hide PIN' : 'Show PIN'}
+                        >
+                          {showNewOwnerPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                      <input
+                        type="password"
+                        maxLength={6}
+                        value={retypeOwnerPin}
+                        onChange={(e) => setRetypeOwnerPin(e.target.value)}
+                        placeholder="Retype New Manager/Founder PIN"
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-white dark:bg-[#26221E] text-sm font-mono text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
+                      />
+                    </div>
                     <span className="text-[10px] text-[#6B5E4C]/80 dark:text-[#B8ACA0]/80 block">
                       Grants absolute administrative override capability (Customer Data, analytical logs, settings).
                     </span>

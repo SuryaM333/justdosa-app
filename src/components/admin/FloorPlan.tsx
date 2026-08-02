@@ -10,12 +10,17 @@ import { Table, Booking, LandmarkPosition, FloorCanvasSettings } from '../../typ
 import { dataService } from '../../services/dataService';
 import { getRequiredTableSeats, formatPartyBreakdownShort } from '../../utils/bookingUtils';
 import { parseToDate, safeGetElapsedMs } from '../../utils/dateUtils';
-
-const getCleanMergedWith = (val: any): number | string | null => {
-  if (!val) return null;
-  if (typeof val === 'object') return null;
-  return val;
-};
+import {
+  resolveGroupMembers,
+  getGroupPrimary,
+  getGroupCombinedCapacity,
+  getGroupCombinedMaxCapacity,
+  getGroupCombinedName,
+  getGroupCombinedShortCode,
+  getGroupCombinedOrderingUrl,
+  isTableMerged,
+  canMerge,
+} from '../../utils/mergeUtils';
 
 interface FloorPlanProps {
   tables: Table[];
@@ -47,9 +52,18 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [quickSeatName, setQuickSeatName] = useState('');
   const [quickSeatPhone, setQuickSeatPhone] = useState('');
   const [quickSeatServer, setQuickSeatServer] = useState('');
-  const [mergeMode, setMergeMode] = useState(false);
-  const [mergeFirstTableId, setMergeFirstTableId] = useState<number | null>(null);
-  
+
+  // Drag-to-merge state: which table is currently being dragged, its live
+  // pointer offset (px), and which other table it's currently hovering over
+  // (the merge candidate, highlighted while hovering).
+  const [mergeDrag, setMergeDrag] = useState<{ tableId: number; dx: number; dy: number; hoverTargetId: number | null } | null>(null);
+  const tableNodeRefs = useRef<Record<number, HTMLDivElement | null>>({});
+  const activeMergeDragRef = useRef<{ tableId: number; startClientX: number; startClientY: number; dragging: boolean } | null>(null);
+  // Set true the instant a merge-drag crosses the movement threshold, so the
+  // native click that follows pointerup on the same element is swallowed
+  // instead of being treated as a tap-to-quick-seat/allocate.
+  const suppressNextClickRef = useRef(false);
+
   // Edit Mode & Canvas State
   const [isEditMode, setIsEditMode] = useState(false);
   const [selectedNode, setSelectedNode] = useState<{ kind: 'table' | 'landmark'; id: number | string } | null>(null);
@@ -150,15 +164,23 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     return `${diffMins}m`;
   };
 
+  // Only a group's primary (lowest id) ever renders its own card — other
+  // members are folded into that one combined card while merged.
+  const primaries = tables.filter((t) => getGroupPrimary(resolveGroupMembers(t, tables)).id === t.id);
+
   const getBestFitTable = (): Table | null => {
     if (!selectedWaitingBooking) return null;
     const requiredSeats = getRequiredTableSeats(selectedWaitingBooking);
 
-    const candidates = tables.filter((t) => !t.isOccupied && !t.isInactive && requiredSeats <= t.maxOverrideCapacity);
+    const candidates = primaries.filter((t) => {
+      if (t.isOccupied || t.isInactive) return false;
+      const group = resolveGroupMembers(t, tables);
+      return requiredSeats <= getGroupCombinedMaxCapacity(group);
+    });
     if (candidates.length === 0) return null;
 
     if (requiredSeats <= 2) {
-      const activeTwoSeaters = tables.filter(t => [5, 6, 7].includes(t.id));
+      const activeTwoSeaters = primaries.filter(t => [5, 6, 7].includes(t.id));
       const occupiedCount = activeTwoSeaters.filter(t => t.isOccupied || t.isInactive).length;
 
       if (occupiedCount >= 2) {
@@ -177,7 +199,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     }
 
     candidates.sort((a, b) => {
-      if (a.capacity !== b.capacity) return a.capacity - b.capacity;
+      const capA = getGroupCombinedCapacity(resolveGroupMembers(a, tables));
+      const capB = getGroupCombinedCapacity(resolveGroupMembers(b, tables));
+      if (capA !== capB) return capA - capB;
       return a.id - b.id;
     });
 
@@ -186,49 +210,36 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
   const bestFitTable = getBestFitTable();
 
-  // Handle table seating/merging/allocation click in operational view
+  // Handle table seating/allocation click in operational view (merging is
+  // now a drag gesture, handled separately by handleTableMergeDragStart /
+  // handlePointerMoveCanvas / handlePointerUpCanvas below).
   const handleTableClick = async (table: Table) => {
     if (isEditMode) return;
-    setErrorToast(null);
-
-    if (mergeMode) {
-      if (table.isOccupied || table.isInactive) {
-        setErrorToast("Can only merge vacant, active tables.");
-        return;
-      }
-
-      if (mergeFirstTableId === null) {
-        setMergeFirstTableId(table.id);
-      } else {
-        if (mergeFirstTableId === table.id) {
-          setMergeFirstTableId(null);
-          return;
-        }
-
-        const firstTable = tables.find(t => t.id === mergeFirstTableId);
-        if (!firstTable) return;
-
-        await dataService.mergeTables(mergeFirstTableId, table.id);
-        setMergeFirstTableId(null);
-        setMergeMode(false);
-        onTableUpdated();
-      }
+    if (suppressNextClickRef.current) {
+      // A real merge-drag just ended on this element — the trailing native
+      // click is not a tap, swallow it.
+      suppressNextClickRef.current = false;
       return;
     }
+    setErrorToast(null);
 
     if (table.isOccupied) {
       setSelectedOccupiedTable(table);
       return;
     }
 
+    const group = resolveGroupMembers(table, tables);
+
     if (selectedWaitingBooking) {
       const requiredSeats = getRequiredTableSeats(selectedWaitingBooking);
-      if (requiredSeats > table.capacity) {
-        if ((table.id === 5 || table.id === 6 || table.id === 7) && requiredSeats <= table.maxOverrideCapacity) {
+      const baseCap = getGroupCombinedCapacity(group);
+      const maxCap = getGroupCombinedMaxCapacity(group);
+      if (requiredSeats > baseCap) {
+        if (requiredSeats <= maxCap) {
           setOverrideConfirmModal({ table, booking: selectedWaitingBooking });
           return;
         } else {
-          setErrorToast(`Party of ${selectedWaitingBooking.partySize} (${requiredSeats} required table seats) exceeds Table ${table.id} capacity (${table.capacity} max).`);
+          setErrorToast(`Party of ${selectedWaitingBooking.partySize} (${requiredSeats} required table seats) exceeds ${getGroupCombinedName(group)} capacity (${baseCap} max).`);
           return;
         }
       }
@@ -242,11 +253,25 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       }
     } else {
       setQuickSeatModal(table);
-      setQuickSeatPartySize(Math.min(2, table.capacity));
+      setQuickSeatPartySize(Math.min(2, getGroupCombinedCapacity(group)));
       setQuickSeatName('');
       setQuickSeatPhone('');
       setQuickSeatServer(table.assignedServer || '');
     }
+  };
+
+  // Starts a candidate merge-drag on pointerdown; whether it becomes a real
+  // drag (vs. a stationary tap) is decided in handlePointerMoveCanvas once
+  // the pointer crosses the movement threshold.
+  const handleTableMergeDragStart = (e: React.PointerEvent, table: Table) => {
+    if (isEditMode || table.isOccupied || table.isInactive || selectedWaitingBooking) return;
+    activeMergeDragRef.current = {
+      tableId: table.id,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      dragging: false,
+    };
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
   };
 
   const handleQuickSeatSubmit = async (e: React.FormEvent) => {
@@ -319,7 +344,33 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   };
 
   const handlePointerMoveCanvas = (e: React.PointerEvent) => {
-    if (!isEditMode || !canvasRef.current) return;
+    if (!canvasRef.current) return;
+
+    // Merge-drag lives entirely outside edit mode, and uses live client-pixel
+    // hit-testing against other tables' rects rather than the canvas's own
+    // percentage math (which the edit-mode drag/resize below relies on).
+    if (!isEditMode) {
+      const drag = activeMergeDragRef.current;
+      if (!drag) return;
+      const dx = e.clientX - drag.startClientX;
+      const dy = e.clientY - drag.startClientY;
+      if (!drag.dragging && Math.hypot(dx, dy) < 8) return;
+      drag.dragging = true;
+      suppressNextClickRef.current = true;
+
+      let hoverTargetId: number | null = null;
+      for (const other of tables) {
+        if (other.id === drag.tableId || other.isOccupied || other.isInactive) continue;
+        const rect = tableNodeRefs.current[other.id]?.getBoundingClientRect();
+        if (rect && e.clientX >= rect.left - 12 && e.clientX <= rect.right + 12 && e.clientY >= rect.top - 12 && e.clientY <= rect.bottom + 12) {
+          hoverTargetId = other.id;
+          break;
+        }
+      }
+      setMergeDrag({ tableId: drag.tableId, dx, dy, hoverTargetId });
+      return;
+    }
+
     const canvasRect = canvasRef.current.getBoundingClientRect();
     if (!canvasRect.width || !canvasRect.height) return;
 
@@ -412,6 +463,36 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       activeResizeRef.current = null;
       setLayoutToast('Floor plan layout saved ✓');
       setTimeout(() => setLayoutToast(null), 2000);
+      return;
+    }
+
+    if (activeMergeDragRef.current) {
+      const { tableId: draggedId } = activeMergeDragRef.current;
+      const hoverTargetId = mergeDrag?.hoverTargetId ?? null;
+      activeMergeDragRef.current = null;
+      setMergeDrag(null);
+
+      if (hoverTargetId !== null) {
+        const draggedTable = tables.find((t) => t.id === draggedId);
+        const targetTable = tables.find((t) => t.id === hoverTargetId);
+        if (draggedTable && targetTable) {
+          const check = canMerge(draggedTable, targetTable, tables);
+          if (!check.ok) {
+            setErrorToast(check.reason || 'Cannot merge these tables.');
+          } else {
+            const groupA = resolveGroupMembers(draggedTable, tables);
+            const groupB = resolveGroupMembers(targetTable, tables);
+            const allIds = Array.from(new Set([...groupA.map((t) => t.id), ...groupB.map((t) => t.id)]));
+            dataService.mergeTables(allIds).then((res) => {
+              if (res.success) {
+                onTableUpdated();
+              } else {
+                setErrorToast(res.error || 'Merge failed.');
+              }
+            });
+          }
+        }
+      }
     }
   };
 
@@ -495,7 +576,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 Selecting table for <strong>{selectedWaitingBooking.firstName}</strong> (Party of {selectedWaitingBooking.partySize}). Tap a vacant table!
               </span>
             ) : (
-              'Tap a vacant table to allocate or quick-seat, or tap an occupied table to finish or view notes.'
+              'Tap a vacant table to allocate or quick-seat, drag one vacant table onto another to merge them, or tap an occupied table to finish or view notes.'
             )}
           </p>
         </div>
@@ -505,13 +586,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           {isOwner && (
             <button
               type="button"
-              onClick={() => {
-                setIsEditMode(!isEditMode);
-                if (mergeMode) {
-                  setMergeMode(false);
-                  setMergeFirstTableId(null);
-                }
-              }}
+              onClick={() => setIsEditMode(!isEditMode)}
               className={`py-2 px-4 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm border ${
                 isEditMode
                   ? 'bg-[#E37A08] hover:bg-[#c96906] text-white border-transparent ring-2 ring-[#E37A08]/50 shadow-md'
@@ -520,25 +595,6 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             >
               <Edit2 className="w-3.5 h-3.5" />
               <span>{isEditMode ? 'Done Editing' : '✏️ Edit Floor Plan'}</span>
-            </button>
-          )}
-
-          {!isEditMode && (
-            <button
-              type="button"
-              onClick={() => {
-                if (mergeMode) setMergeFirstTableId(null);
-                setMergeMode(!mergeMode);
-                setErrorToast(null);
-              }}
-              className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm border ${
-                mergeMode
-                  ? 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600 shadow-amber-500/20 ring-2 ring-amber-500'
-                  : 'bg-[#F5F2EA] dark:bg-[#1C1917] hover:bg-[#E8E2D2] dark:hover:bg-[#26221E] text-[#8B4513] dark:text-[#D2B48C] border-[#E8E2D2] dark:border-[#3D352E]'
-              }`}
-            >
-              <GitMerge className="w-3.5 h-3.5" />
-              <span>{mergeMode ? 'Exit Merge' : 'Merge Tables'}</span>
             </button>
           )}
 
@@ -689,21 +745,6 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
         </div>
       )}
 
-      {/* Merge Selection Banner */}
-      {mergeMode && (
-        <div className="mb-4 p-3 rounded-xl bg-amber-100 dark:bg-amber-950/80 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs font-bold flex items-center justify-between">
-          <span>
-            {mergeFirstTableId === null
-              ? "TAP THE FIRST TABLE you wish to merge..."
-              : `Selected Table ${mergeFirstTableId}. NOW TAP THE SECOND TABLE to combine them into one layout!`
-            }
-          </span>
-          <button onClick={() => { setMergeMode(false); setMergeFirstTableId(null); }} className="p-1 hover:opacity-80">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
       {/* FREE-POSITION CANVAS CONTAINER */}
       <div 
         ref={canvasRef}
@@ -775,120 +816,166 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
           );
         })}
 
-        {/* 2. RENDER TABLES */}
-        {tables.map((table) => {
-          const coords = getTableCoords(table);
-          const booking = getTableBooking(table);
-          const isBestFit = bestFitTable?.id === table.id;
-          const isSelectedForMerge = mergeFirstTableId === table.id;
-          const isSelectedNode = selectedNode?.kind === 'table' && selectedNode.id === table.id;
+        {/* 2. RENDER TABLES — only a group's primary renders; merged members are folded into it */}
+        <AnimatePresence>
+          {primaries.map((table) => {
+            const group = resolveGroupMembers(table, tables);
+            const merged = isTableMerged(table);
 
-          let statusBg = 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 text-emerald-950 dark:text-emerald-100';
-          let badgeColor = 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300';
+            // Union bounding box of every member's own stored rect when merged,
+            // so the combined unit visually occupies the space of all members.
+            const coords = merged
+              ? (() => {
+                  const rects = group.map(getTableCoords);
+                  const x0 = Math.min(...rects.map((r) => r.x));
+                  const y0 = Math.min(...rects.map((r) => r.y));
+                  const x1 = Math.max(...rects.map((r) => r.x + r.width));
+                  const y1 = Math.max(...rects.map((r) => r.y + r.height));
+                  return { x: x0, y: y0, width: x1 - x0, height: y1 - y0, shape: 'rectangle' as const };
+                })()
+              : getTableCoords(table);
 
-          if (table.isInactive) {
-            statusBg = 'bg-stone-200 dark:bg-stone-900/60 border-stone-400 text-stone-500 opacity-60';
-            badgeColor = 'bg-stone-300 dark:bg-stone-800 text-stone-600';
-          } else if (table.isOccupied) {
-            statusBg = 'bg-[#E37A08]/15 dark:bg-[#E37A08]/25 border-[#E37A08] text-[#2D2926] dark:text-white';
-            badgeColor = 'bg-[#E37A08] text-white';
-          }
+            const booking = getTableBooking(table);
+            const isBestFit = bestFitTable?.id === table.id;
+            const isSelectedNode = selectedNode?.kind === 'table' && selectedNode.id === table.id;
+            const isBeingDragged = mergeDrag?.tableId === table.id;
+            const isDropHoverTarget = mergeDrag?.hoverTargetId === table.id;
+            const combinedCapacity = getGroupCombinedCapacity(group);
+            const combinedName = getGroupCombinedName(group);
 
-          if (isBestFit && !table.isOccupied && !table.isInactive) {
-            statusBg = 'bg-amber-100 dark:bg-amber-950/60 border-amber-400 text-amber-950 dark:text-amber-100 ring-4 ring-amber-400/50 animate-pulse';
-          }
+            let statusBg = 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 text-emerald-950 dark:text-emerald-100';
+            let badgeColor = 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300';
 
-          if (isSelectedForMerge) {
-            statusBg = 'bg-blue-100 dark:bg-blue-950/80 border-blue-500 ring-4 ring-blue-500/50';
-          }
+            if (table.isInactive) {
+              statusBg = 'bg-stone-200 dark:bg-stone-900/60 border-stone-400 text-stone-500 opacity-60';
+              badgeColor = 'bg-stone-300 dark:bg-stone-800 text-stone-600';
+            } else if (table.isOccupied) {
+              statusBg = 'bg-[#E37A08]/15 dark:bg-[#E37A08]/25 border-[#E37A08] text-[#2D2926] dark:text-white';
+              badgeColor = 'bg-[#E37A08] text-white';
+            }
 
-          const isDiamond = coords.shape === 'diamond';
+            if (isBestFit && !table.isOccupied && !table.isInactive) {
+              statusBg = 'bg-amber-100 dark:bg-amber-950/60 border-amber-400 text-amber-950 dark:text-amber-100 ring-4 ring-amber-400/50 animate-pulse';
+            }
 
-          return (
-            <div
-              key={`tbl-${table.id}`}
-              onPointerDown={(e) => {
-                if (isEditMode) {
-                  handlePointerDownDrag(e, 'table', table.id, coords.x, coords.y, coords.width, coords.height);
-                } else {
-                  handleTableClick(table);
-                }
-              }}
-              onClick={() => {
-                if (!isEditMode) handleTableClick(table);
-              }}
-              className={`absolute rounded-2xl border-2 flex flex-col items-center justify-between p-2 shadow-md transition-all select-none ${statusBg} ${
-                isEditMode ? 'cursor-grab active:cursor-grabbing hover:border-[#E37A08]' : 'cursor-pointer hover:scale-[1.02]'
-              } ${isDiamond ? 'rotate-45' : ''} ${isSelectedNode ? 'ring-4 ring-[#E37A08] border-[#E37A08] z-20' : 'z-10'}`}
-              style={{
-                left: `${coords.x}%`,
-                top: `${coords.y}%`,
-                width: `${coords.width}%`,
-                height: `${coords.height}%`,
-              }}
-            >
-              {/* Table Content Wrapper (Counter-rotates text if diamond) */}
-              <div className={`w-full h-full flex flex-col items-center justify-between ${isDiamond ? '-rotate-45' : ''}`}>
-                <div className="w-full flex items-center justify-between">
-                  <span className="font-serif font-black text-xs sm:text-sm text-[#8B4513] dark:text-[#D2B48C]">
-                    {table.name}
-                  </span>
-                  <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-black ${badgeColor}`}>
-                    {table.capacity}p
-                  </span>
-                </div>
+            if (isDropHoverTarget) {
+              statusBg = 'bg-blue-100 dark:bg-blue-950/80 border-blue-500 ring-4 ring-blue-500/50';
+            }
 
-                {/* Seated Info or Status */}
-                <div className="text-center my-auto w-full px-1">
-                  {table.isOccupied && booking ? (
-                    <div className="space-y-0.5">
-                      <p className="font-bold text-[10px] sm:text-xs truncate text-[#2D2926] dark:text-white">
-                        {booking.firstName}
-                      </p>
-                      <p className="text-[9px] font-semibold text-[#6B5E4C] dark:text-[#B8ACA0]">
-                        {formatPartyBreakdownShort(booking)}
-                      </p>
-                      <div className="flex items-center justify-center gap-1 text-[9px] font-bold text-[#E37A08]">
-                        <Clock className="w-2.5 h-2.5" />
-                        <span>{getSeatedDuration(booking.seatedAt)}</span>
+            const isDiamond = !merged && coords.shape === 'diamond';
+
+            return (
+              <motion.div
+                key={`tbl-${table.id}`}
+                layout={!isBeingDragged}
+                layoutId={`table-${table.id}`}
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                ref={(el: HTMLDivElement | null) => { tableNodeRefs.current[table.id] = el; }}
+                onPointerDown={(e) => {
+                  if (isEditMode) {
+                    handlePointerDownDrag(e, 'table', table.id, coords.x, coords.y, coords.width, coords.height);
+                  } else {
+                    handleTableMergeDragStart(e, table);
+                  }
+                }}
+                onClick={() => {
+                  if (!isEditMode) handleTableClick(table);
+                }}
+                className={`absolute rounded-2xl border-2 flex flex-col items-center justify-between p-2 shadow-md select-none ${statusBg} ${
+                  isEditMode ? 'cursor-grab active:cursor-grabbing hover:border-[#E37A08]' : 'cursor-pointer'
+                } ${isDiamond ? 'rotate-45' : ''} ${isSelectedNode ? 'ring-4 ring-[#E37A08] border-[#E37A08] z-20' : isBeingDragged ? 'z-40 shadow-2xl' : 'z-10'}`}
+                style={{
+                  left: `${coords.x}%`,
+                  top: `${coords.y}%`,
+                  width: `${coords.width}%`,
+                  height: `${coords.height}%`,
+                  transform: isBeingDragged ? `translate(${mergeDrag!.dx}px, ${mergeDrag!.dy}px)` : undefined,
+                }}
+              >
+                {/* Table Content Wrapper (Counter-rotates text if diamond) */}
+                <div className={`w-full h-full flex flex-col items-center justify-between ${isDiamond ? '-rotate-45' : ''}`}>
+                  <div className="w-full flex items-center justify-between">
+                    <span className="font-serif font-black text-xs sm:text-sm text-[#8B4513] dark:text-[#D2B48C]">
+                      {combinedName}
+                    </span>
+                    <span className={`px-1.5 py-0.5 rounded-md text-[9px] font-black ${badgeColor}`}>
+                      {combinedCapacity}p
+                    </span>
+                  </div>
+
+                  {/* Seated Info or Status */}
+                  <div className="text-center my-auto w-full px-1">
+                    {table.isOccupied && booking ? (
+                      <div className="space-y-0.5">
+                        <p className="font-bold text-[10px] sm:text-xs truncate text-[#2D2926] dark:text-white">
+                          {booking.firstName}
+                        </p>
+                        <p className="text-[9px] font-semibold text-[#6B5E4C] dark:text-[#B8ACA0]">
+                          {formatPartyBreakdownShort(booking)}
+                        </p>
+                        <div className="flex items-center justify-center gap-1 text-[9px] font-bold text-[#E37A08]">
+                          <Clock className="w-2.5 h-2.5" />
+                          <span>{getSeatedDuration(booking.seatedAt)}</span>
+                        </div>
                       </div>
-                    </div>
-                  ) : table.isInactive ? (
-                    <span className="text-[9px] font-bold uppercase text-stone-500">Blocked</span>
-                  ) : isBestFit ? (
-                    <span className="text-[9px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-300">★ Best Fit</span>
-                  ) : (
-                    <span className="text-[9px] font-bold uppercase text-emerald-700 dark:text-emerald-400">Available</span>
-                  )}
+                    ) : table.isInactive ? (
+                      <span className="text-[9px] font-bold uppercase text-stone-500">Blocked</span>
+                    ) : isDropHoverTarget ? (
+                      <span className="text-[9px] font-black uppercase tracking-wider text-blue-700 dark:text-blue-300">Drop to Merge</span>
+                    ) : isBestFit ? (
+                      <span className="text-[9px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-300">★ Best Fit</span>
+                    ) : (
+                      <span className="text-[9px] font-bold uppercase text-emerald-700 dark:text-emerald-400">Available</span>
+                    )}
+                  </div>
+
+                  {/* Merged / Override Indicator */}
+                  <div className="w-full text-center">
+                    {merged && !table.isOccupied ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          dataService.unmergeGroup(table.id).then((res) => {
+                            if (res.success) onTableUpdated();
+                            else setErrorToast(res.error || 'Unmerge failed.');
+                          });
+                        }}
+                        className="inline-flex items-center gap-1 text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-blue-500 hover:bg-blue-600 text-white cursor-pointer"
+                        title="Un-merge these tables"
+                      >
+                        <GitMerge className="w-2.5 h-2.5" />
+                        {getGroupCombinedShortCode(group)} · Unmerge
+                      </button>
+                    ) : merged ? (
+                      <span className="text-[8px] font-extrabold uppercase px-1 rounded bg-blue-500 text-white">
+                        {getGroupCombinedShortCode(group)}
+                      </span>
+                    ) : table.maxOverrideCapacity > table.capacity ? (
+                      <span className="text-[8px] font-bold text-[#6B5E4C] dark:text-[#B8ACA0]">
+                        +1 Allowed
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
 
-                {/* Merged or Override Indicator */}
-                <div className="w-full text-center">
-                  {table.mergedWith ? (
-                    <span className="text-[8px] font-extrabold uppercase px-1 rounded bg-blue-500 text-white">
-                      Merged w/ T{table.mergedWith}
-                    </span>
-                  ) : table.maxOverrideCapacity > table.capacity ? (
-                    <span className="text-[8px] font-bold text-[#6B5E4C] dark:text-[#B8ACA0]">
-                      +1 Allowed
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-
-              {/* Resize Handle in Edit Mode */}
-              {isEditMode && isSelectedNode && (
-                <div
-                  onPointerDown={(e) => handlePointerDownResize(e, 'table', table.id, coords.width, coords.height)}
-                  className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[#E37A08] text-white flex items-center justify-center cursor-nwse-resize shadow-md z-30"
-                  title="Drag to resize table"
-                >
-                  <Maximize2 className="w-3 h-3" />
-                </div>
-              )}
-            </div>
-          );
-        })}
+                {/* Resize Handle in Edit Mode */}
+                {isEditMode && isSelectedNode && (
+                  <div
+                    onPointerDown={(e) => handlePointerDownResize(e, 'table', table.id, coords.width, coords.height)}
+                    className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-[#E37A08] text-white flex items-center justify-center cursor-nwse-resize shadow-md z-30"
+                    title="Drag to resize table"
+                  >
+                    <Maximize2 className="w-3 h-3" />
+                  </div>
+                )}
+              </motion.div>
+            );
+          })}
+        </AnimatePresence>
       </div>
 
       {/* INSPECTOR PANEL FOR SELECTED NODE IN EDIT MODE */}
@@ -1006,51 +1093,57 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
 
       {/* OVERRIDE CAPACITY CONFIRM MODAL */}
       <AnimatePresence>
-        {overrideConfirmModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white dark:bg-[#26221E] rounded-3xl p-6 max-w-md w-full shadow-2xl border border-[#E8E2D2] dark:border-[#3D352E] space-y-4 text-center"
-            >
-              <div className="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-600 flex items-center justify-center mx-auto">
-                <AlertTriangle className="w-6 h-6" />
-              </div>
-              <h3 className="text-lg font-serif font-bold text-[#2D2926] dark:text-white">
-                Override Table {overrideConfirmModal.table.id} Capacity?
-              </h3>
-              <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0] leading-relaxed">
-                Standard capacity is <strong>{overrideConfirmModal.table.capacity} seats</strong>.
-                Party of <strong>{overrideConfirmModal.booking.partySize}</strong> ({getRequiredTableSeats(overrideConfirmModal.booking)} required table seats) can be seated using the +1 chair override.
-              </p>
-              <div className="flex items-center gap-3 pt-2">
-                <button
-                  onClick={() => setOverrideConfirmModal(null)}
-                  className="flex-1 py-3 rounded-2xl bg-[#F5F2EA] dark:bg-[#1C1917] text-[#6B5E4C] dark:text-[#B8ACA0] font-bold text-xs hover:bg-[#E8E2D2] transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={async () => {
-                    const { table, booking } = overrideConfirmModal;
-                    setOverrideConfirmModal(null);
-                    const res = await dataService.allocateTable(booking.id, table.id);
-                    if (res.success) {
-                      onSelectWaitingBooking(null);
-                      onTableUpdated();
-                    } else {
-                      setErrorToast(res.error || 'Allocation failed.');
-                    }
-                  }}
-                  className="flex-1 py-3 rounded-2xl bg-[#E37A08] hover:bg-[#c96906] text-white font-bold text-xs shadow-md transition-colors cursor-pointer"
-                >
-                  Confirm +1 Override
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
+        {overrideConfirmModal && (() => {
+          const group = resolveGroupMembers(overrideConfirmModal.table, tables);
+          const baseCap = getGroupCombinedCapacity(group);
+          const maxCap = getGroupCombinedMaxCapacity(group);
+          const overrideAmount = maxCap - baseCap;
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-white dark:bg-[#26221E] rounded-3xl p-6 max-w-md w-full shadow-2xl border border-[#E8E2D2] dark:border-[#3D352E] space-y-4 text-center"
+              >
+                <div className="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-950/80 text-amber-600 flex items-center justify-center mx-auto">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <h3 className="text-lg font-serif font-bold text-[#2D2926] dark:text-white">
+                  Override {getGroupCombinedName(group)} Capacity?
+                </h3>
+                <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0] leading-relaxed">
+                  Standard capacity is <strong>{baseCap} seats</strong>.
+                  Party of <strong>{overrideConfirmModal.booking.partySize}</strong> ({getRequiredTableSeats(overrideConfirmModal.booking)} required table seats) can be seated using the +{overrideAmount} chair override.
+                </p>
+                <div className="flex items-center gap-3 pt-2">
+                  <button
+                    onClick={() => setOverrideConfirmModal(null)}
+                    className="flex-1 py-3 rounded-2xl bg-[#F5F2EA] dark:bg-[#1C1917] text-[#6B5E4C] dark:text-[#B8ACA0] font-bold text-xs hover:bg-[#E8E2D2] transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const { table, booking } = overrideConfirmModal;
+                      setOverrideConfirmModal(null);
+                      const res = await dataService.allocateTable(booking.id, table.id, undefined, overrideAmount);
+                      if (res.success) {
+                        onSelectWaitingBooking(null);
+                        onTableUpdated();
+                      } else {
+                        setErrorToast(res.error || 'Allocation failed.');
+                      }
+                    }}
+                    className="flex-1 py-3 rounded-2xl bg-[#E37A08] hover:bg-[#c96906] text-white font-bold text-xs shadow-md transition-colors cursor-pointer"
+                  >
+                    Confirm +{overrideAmount} Override
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
       </AnimatePresence>
 
       {/* QUICK SEAT WALK-IN MODAL */}
@@ -1065,7 +1158,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             >
               <div className="flex items-center justify-between pb-2 border-b border-[#E8E2D2] dark:border-[#3D352E]">
                 <h3 className="text-base font-serif font-bold text-[#2D2926] dark:text-white flex items-center gap-2">
-                  <span>Quick Seat — Table {quickSeatModal.id}</span>
+                  <span>Quick Seat — {getGroupCombinedName(resolveGroupMembers(quickSeatModal, tables))}</span>
                   <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-sans">Vacant</span>
                 </h3>
                 <button onClick={() => setQuickSeatModal(null)} className="p-1 text-[#6B5E4C] hover:opacity-80">
@@ -1078,13 +1171,16 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                   <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase mb-1">
                     Party Size
                   </label>
-                  <div className="flex items-center gap-2">
-                    {[1, 2, 3, 4, 5, 6, 7, 8].map((size) => (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {Array.from(
+                      { length: Math.max(8, getGroupCombinedMaxCapacity(resolveGroupMembers(quickSeatModal, tables))) },
+                      (_, i) => i + 1
+                    ).map((size) => (
                       <button
                         type="button"
                         key={size}
                         onClick={() => setQuickSeatPartySize(size)}
-                        className={`flex-1 py-2 rounded-xl text-xs font-black transition-all ${
+                        className={`w-9 py-2 rounded-xl text-xs font-black transition-all ${
                           quickSeatPartySize === size
                             ? 'bg-[#E37A08] text-white shadow-sm'
                             : 'bg-[#F5F2EA] dark:bg-[#1C1917] text-[#2D2926] dark:text-white hover:bg-[#E8E2D2]'
@@ -1165,6 +1261,8 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       <AnimatePresence>
         {selectedOccupiedTable && (() => {
           const booking = getTableBooking(selectedOccupiedTable);
+          const occupiedGroup = resolveGroupMembers(selectedOccupiedTable, tables);
+          const occupiedOrderingUrl = getGroupCombinedOrderingUrl(occupiedGroup);
           return (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
               <motion.div
@@ -1175,7 +1273,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               >
                 <div className="flex items-center justify-between pb-2 border-b border-[#E8E2D2] dark:border-[#3D352E]">
                   <h3 className="text-base font-serif font-bold text-[#2D2926] dark:text-white flex items-center gap-2">
-                    <span>{selectedOccupiedTable.name} Details</span>
+                    <span>{getGroupCombinedName(occupiedGroup)} Details</span>
                     <span className="text-xs px-2.5 py-0.5 rounded-full bg-[#E37A08] text-white font-bold">Occupied</span>
                   </h3>
                   <button onClick={() => setSelectedOccupiedTable(null)} className="p-1 text-[#6B5E4C] hover:opacity-80">
@@ -1210,12 +1308,12 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                       )}
                     </div>
 
-                    {selectedOccupiedTable.orderingUrl && (
+                    {occupiedOrderingUrl && (
                       <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900 flex items-center justify-between">
                         <span className="text-xs font-bold text-[#8B4513] dark:text-[#D2B48C]">Square QR Ordering URL:</span>
                         <button
                           onClick={() => {
-                            navigator.clipboard.writeText(selectedOccupiedTable.orderingUrl!);
+                            navigator.clipboard.writeText(occupiedOrderingUrl);
                             setLayoutToast('Ordering URL copied!');
                             setTimeout(() => setLayoutToast(null), 2000);
                           }}

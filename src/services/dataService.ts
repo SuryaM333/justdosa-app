@@ -29,20 +29,21 @@ export interface KalyanaSlotLiveInfo {
 import { playNewBookingChime } from '../utils/sound';
 import { getRequiredTableSeats } from '../utils/bookingUtils';
 import { initializeApp } from 'firebase/app';
-import { 
+import {
   initializeFirestore,
-  getFirestore, 
-  collection, 
-  doc, 
-  setDoc, 
-  getDoc, 
-  onSnapshot, 
+  getFirestore,
+  collection,
+  doc,
+  setDoc,
+  getDoc,
+  onSnapshot,
   runTransaction,
   writeBatch,
   deleteDoc,
   deleteField,
   setLogLevel,
-  enableIndexedDbPersistence
+  enableIndexedDbPersistence,
+  connectFirestoreEmulator
 } from 'firebase/firestore';
 import { hashPin } from '../utils/crypto';
 
@@ -51,13 +52,20 @@ import { hashPin } from '../utils/crypto';
 // ----------------------------------------------------
 import firebaseConfig from '../../firebase-applet-config.json';
 
+// Tests set VITE_USE_FIRESTORE_EMULATOR=true so E2E runs never touch the live
+// production project. The emulator only supports the default database, so we
+// skip the named firestoreDatabaseId in that mode.
+const USE_EMULATOR = (import.meta as any).env?.VITE_USE_FIRESTORE_EMULATOR === 'true';
+
 const app = initializeApp(firebaseConfig);
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true
-}, firebaseConfig.firestoreDatabaseId);
+}, USE_EMULATOR ? undefined : firebaseConfig.firestoreDatabaseId);
 setLogLevel('silent');
 
-if (typeof window !== 'undefined') {
+if (USE_EMULATOR) {
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+} else if (typeof window !== 'undefined') {
   enableIndexedDbPersistence(db).catch(() => {});
 }
 
@@ -524,11 +532,15 @@ function initFirestoreSync() {
             if (!data.name || data.name.trim() === '') {
               data.name = `Table ${data.id}`;
             }
-            if (data.mergedWith !== undefined && data.mergedWith !== null) {
-              data.mergedWith = Number(data.mergedWith);
-              if (isNaN(data.mergedWith)) {
-                data.mergedWith = undefined;
-              }
+            if (Array.isArray(data.mergeGroupTableIds)) {
+              const cleanedIds = data.mergeGroupTableIds
+                .map((v) => Number(v))
+                .filter((v) => !isNaN(v) && v > 0);
+              data.mergeGroupTableIds = cleanedIds.length > 1 ? cleanedIds.sort((a, b) => a - b) : undefined;
+              if (!data.mergeGroupTableIds) data.mergeGroupId = undefined;
+            } else {
+              data.mergeGroupTableIds = undefined;
+              data.mergeGroupId = undefined;
             }
             tables.push(data);
           }
@@ -1222,7 +1234,7 @@ export const dataService = {
       notifyListeners();
       const batch = writeBatch(db);
       validTables.forEach((t) => {
-        batch.set(doc(db, 'tables', t.id.toString()), t);
+        batch.set(doc(db, 'tables', t.id.toString()), sanitizeOutgoingData(t));
       });
       await batch.commit();
     } catch (error) {
@@ -1238,7 +1250,7 @@ export const dataService = {
     try {
       const batch = writeBatch(db);
       bookings.forEach((b) => {
-        batch.set(doc(db, 'bookings', b.id), b);
+        batch.set(doc(db, 'bookings', b.id), sanitizeOutgoingData(b));
       });
       await batch.commit();
     } catch (error) {
@@ -1254,7 +1266,7 @@ export const dataService = {
     try {
       const batch = writeBatch(db);
       Object.entries(customers).forEach(([phone, c]) => {
-        batch.set(doc(db, 'customers', phone), c);
+        batch.set(doc(db, 'customers', phone), sanitizeOutgoingData(c));
       });
       await batch.commit();
     } catch (error) {
@@ -1265,7 +1277,7 @@ export const dataService = {
   async updateCustomer(phoneKey: string, updates: Partial<Customer>) {
     try {
       const cleaned = cleanPhoneNumber(phoneKey);
-      await setDoc(doc(db, 'customers', cleaned), updates, { merge: true });
+      await safeSetDoc(doc(db, 'customers', cleaned), updates, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'customers');
     }
@@ -1310,43 +1322,107 @@ export const dataService = {
     }
   },
 
-  async mergeTables(tableId1: number, tableId2: number) {
+  async mergeTables(tableIds: number[]): Promise<{ success: boolean; error?: string }> {
+    const requestedIds = Array.from(new Set(tableIds));
+    if (requestedIds.length < 2) {
+      return { success: false, error: 'Select at least two tables to merge.' };
+    }
     try {
-      const table1Ref = doc(db, 'tables', tableId1.toString());
-      const table2Ref = doc(db, 'tables', tableId2.toString());
-      
-      await safeRunTransaction(db, async (transaction) => {
-        const snap1 = await transaction.get(table1Ref);
-        const snap2 = await transaction.get(table2Ref);
-        
-        if (!snap1.exists() || !snap2.exists()) return;
-        
-        transaction.update(table1Ref, { mergedWith: tableId2 });
-        transaction.update(table2Ref, { mergedWith: tableId1 });
+      const result = await safeRunTransaction(db, async (transaction) => {
+        // Read every requested table, then pull in any partners already on
+        // their existing merge groups (this is how dragging a 3rd table onto
+        // an existing merged pair grows it to a trio in one operation).
+        const refs = new Map<number, ReturnType<typeof doc>>();
+        const snaps = new Map<number, Awaited<ReturnType<typeof getDoc>>>();
+        const getSnap = async (id: number) => {
+          if (snaps.has(id)) return snaps.get(id)!;
+          const ref = doc(db, 'tables', id.toString());
+          refs.set(id, ref);
+          const snap = await transaction.get(ref);
+          snaps.set(id, snap);
+          return snap;
+        };
+
+        const allIds = new Set(requestedIds);
+        for (const id of requestedIds) {
+          const snap = await getSnap(id);
+          if (snap.exists()) {
+            const data = snap.data() as Table;
+            (data.mergeGroupTableIds || []).forEach((memberId) => allIds.add(memberId));
+          }
+        }
+        for (const id of allIds) {
+          await getSnap(id);
+        }
+
+        if (allIds.size > 3) {
+          return { success: false, error: 'Maximum 3 tables can be merged together.' };
+        }
+
+        for (const id of allIds) {
+          const snap = snaps.get(id)!;
+          if (!snap.exists()) {
+            return { success: false, error: `Table ${id} not found.` };
+          }
+          const data = snap.data() as Table;
+          if (data.isOccupied) {
+            return { success: false, error: `Table ${id} is occupied.` };
+          }
+          if (data.isInactive) {
+            return { success: false, error: `Table ${id} is inactive.` };
+          }
+        }
+
+        const sortedIds = Array.from(allIds).sort((a, b) => a - b);
+        const groupId = `grp-${sortedIds[0]}`;
+        for (const id of sortedIds) {
+          transaction.update(refs.get(id)!, sanitizeOutgoingData({
+            mergeGroupId: groupId,
+            mergeGroupTableIds: sortedIds,
+          }));
+        }
+        return { success: true };
       });
+      return result;
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `tables/merge/${tableId1}_${tableId2}`);
+      handleFirestoreError(error, OperationType.WRITE, `tables/merge/${requestedIds.join('_')}`);
+      return { success: false, error: 'Something went wrong, please try again or see staff.' };
     }
   },
 
-  async dissolveMerge(tableId: number) {
+  async unmergeGroup(tableId: number): Promise<{ success: boolean; error?: string }> {
     try {
-      const tableRef = doc(db, 'tables', tableId.toString());
-      const tableSnap = await getDoc(tableRef);
-      if (!tableSnap.exists()) return;
-      
-      const table = tableSnap.data() as Table;
-      const otherId = table.mergedWith;
-      
-      await safeRunTransaction(db, async (transaction) => {
-        transaction.update(tableRef, { mergedWith: deleteField() });
-        if (otherId) {
-          const otherRef = doc(db, 'tables', otherId.toString());
-          transaction.update(otherRef, { mergedWith: deleteField() });
+      const result = await safeRunTransaction(db, async (transaction) => {
+        const tableRef = doc(db, 'tables', tableId.toString());
+        const tableSnap = await transaction.get(tableRef);
+        if (!tableSnap.exists()) {
+          return { success: false, error: 'Table not found.' };
         }
+        const table = tableSnap.data() as Table;
+        const memberIds = table.mergeGroupTableIds && table.mergeGroupTableIds.length > 1
+          ? table.mergeGroupTableIds
+          : [tableId];
+
+        const refs = memberIds.map((id) => doc(db, 'tables', id.toString()));
+        const snaps = await Promise.all(refs.map((ref) => transaction.get(ref)));
+        for (const snap of snaps) {
+          if (snap.exists() && (snap.data() as Table).isOccupied) {
+            return { success: false, error: 'Cannot unmerge an occupied unit.' };
+          }
+        }
+
+        for (const ref of refs) {
+          transaction.update(ref, {
+            mergeGroupId: deleteField(),
+            mergeGroupTableIds: deleteField(),
+          });
+        }
+        return { success: true };
       });
+      return result;
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `tables/dissolve/${tableId}`);
+      handleFirestoreError(error, OperationType.WRITE, `tables/unmerge/${tableId}`);
+      return { success: false, error: 'Something went wrong, please try again or see staff.' };
     }
   },
 
@@ -1790,19 +1866,21 @@ export const dataService = {
     const prevTables = JSON.parse(JSON.stringify(cachedTables));
     const prevBookings = JSON.parse(JSON.stringify(cachedBookings));
 
-    // Optimistic local update
+    // Optimistic local update. `tableId` is expected to be the group's primary
+    // (only the primary card is ever clickable in the floor plan), so every
+    // other member is inferred from its own mergeGroupTableIds.
     const optTable = cachedTables.find((t) => t.id === tableId);
     const optBooking = cachedBookings.find((b) => b.id === bookingId);
     if (optTable && optBooking && !optTable.isOccupied && !optTable.isInactive) {
-      optTable.isOccupied = true;
-      optTable.currentBookingId = bookingId;
-      optTable.extraSeats = extraSeats;
-      if (optTable.mergedWith) {
-        const optOther = cachedTables.find((t) => t.id === optTable.mergedWith);
-        if (optOther) {
-          optOther.isOccupied = true;
-          optOther.currentBookingId = bookingId;
-        }
+      const optMemberIds = optTable.mergeGroupTableIds && optTable.mergeGroupTableIds.length > 1
+        ? optTable.mergeGroupTableIds
+        : [tableId];
+      for (const memberId of optMemberIds) {
+        const member = cachedTables.find((t) => t.id === memberId);
+        if (!member) continue;
+        member.isOccupied = true;
+        member.currentBookingId = bookingId;
+        if (memberId === tableId) member.extraSeats = extraSeats;
       }
       optBooking.status = 'seated';
       optBooking.tableId = tableId;
@@ -1836,20 +1914,43 @@ export const dataService = {
           return { success: false, error: 'table just taken' };
         }
 
-        const requiredSeats = getRequiredTableSeats(booking);
-        let maxCap = table.capacity + extraSeats;
-        if (table.mergedWith) {
-          const otherTable = cachedTables.find((t) => t.id === table.mergedWith);
-          if (otherTable) {
-            maxCap += otherTable.capacity + (otherTable.extraSeats || 0);
+        // Read every OTHER group member transactionally (not from the client
+        // cache, which could be stale) so capacity and occupancy checks
+        // reflect the live, uncommitted-elsewhere state.
+        const memberIds = table.mergeGroupTableIds && table.mergeGroupTableIds.length > 1
+          ? table.mergeGroupTableIds
+          : [tableId];
+        const otherIds = memberIds.filter((id) => id !== tableId);
+        const otherRefs = otherIds.map((id) => doc(db, 'tables', id.toString()));
+        const otherSnaps = await Promise.all(otherRefs.map((ref) => transaction.get(ref)));
+        const otherTables: Table[] = [];
+        for (const snap of otherSnaps) {
+          if (!snap.exists()) {
+            return { success: false, error: 'A merged table was not found.' };
           }
+          const otherData = snap.data() as Table;
+          if (otherData.isOccupied) {
+            return { success: false, error: 'table just taken' };
+          }
+          if (otherData.isInactive) {
+            return { success: false, error: `Cannot allocate to inactive ${otherData.name || `Table ${otherData.id}`}` };
+          }
+          otherTables.push(otherData);
         }
-        maxCap = Math.max(maxCap, table.maxOverrideCapacity);
+
+        const requiredSeats = getRequiredTableSeats(booking);
+        const groupMembers = [table, ...otherTables];
+        const baseCap = groupMembers.reduce((sum, t) => sum + (t.capacity || 0), 0);
+        const overrideHeadroom = groupMembers.reduce(
+          (sum, t) => sum + Math.max(0, (t.maxOverrideCapacity || t.capacity || 0) - (t.capacity || 0)),
+          0
+        );
+        const maxCap = Math.max(baseCap + extraSeats, baseCap + overrideHeadroom);
 
         if (requiredSeats > maxCap) {
-          return { 
-            success: false, 
-            error: `Party of ${booking.partySize} (${requiredSeats} required table seats) exceeds Table ${tableId} maximum capacity (${maxCap})` 
+          return {
+            success: false,
+            error: `Party of ${booking.partySize} (${requiredSeats} required table seats) exceeds ${table.name || `Table ${tableId}`} maximum capacity (${maxCap})`
           };
         }
 
@@ -1859,13 +1960,12 @@ export const dataService = {
           extraSeats
         }));
 
-        if (table.mergedWith) {
-          const otherDocRef = doc(db, 'tables', table.mergedWith.toString());
-          transaction.update(otherDocRef, sanitizeOutgoingData({
+        otherRefs.forEach((otherRef) => {
+          transaction.update(otherRef, sanitizeOutgoingData({
             isOccupied: true,
             currentBookingId: booking.id
           }));
-        }
+        });
 
         const bookingUpdate: any = {
           status: 'seated',
@@ -1911,19 +2011,21 @@ export const dataService = {
     const tableToFinish = cachedTables.find((t) => t.id === tableId);
     const bId = tableToFinish?.currentBookingId;
 
-    // Find all tables that share this tableId OR bookingId OR are merged with tableId
-    const affectedTables = cachedTables.filter(t => 
-      t.id === tableId || 
-      (bId && t.currentBookingId === bId) || 
-      t.mergedWith === tableId || 
-      (tableToFinish?.mergedWith && t.id === tableToFinish.mergedWith)
+    // Find all tables that share this tableId OR bookingId OR are merged with
+    // tableId. Finishing a merged party always dissolves the merge, so the
+    // tables separate back to their own individual states.
+    const affectedTables = cachedTables.filter(t =>
+      t.id === tableId ||
+      (bId && t.currentBookingId === bId) ||
+      (tableToFinish?.mergeGroupId && t.mergeGroupId === tableToFinish.mergeGroupId)
     );
 
     // Optimistic local update for all affected tables
     for (const t of affectedTables) {
       t.isOccupied = false;
       t.currentBookingId = undefined;
-      t.mergedWith = undefined;
+      t.mergeGroupId = undefined;
+      t.mergeGroupTableIds = undefined;
       t.extraSeats = 0;
     }
 
@@ -1937,25 +2039,18 @@ export const dataService = {
     notifyListeners();
 
     try {
-      // 1. Free all affected tables in Firestore
+      // 1. Free all affected tables in Firestore in one atomic batch.
+      const freeBatch = writeBatch(db);
       for (const t of affectedTables) {
-        const tableDocRef = doc(db, 'tables', t.id.toString());
-        await safeSetDoc(tableDocRef, {
+        freeBatch.set(doc(db, 'tables', t.id.toString()), {
           isOccupied: false,
           currentBookingId: null,
-          mergedWith: deleteField(),
+          mergeGroupId: deleteField(),
+          mergeGroupTableIds: deleteField(),
           extraSeats: 0
         }, { merge: true });
       }
-
-      // Also directly clear the main tableDocRef just in case
-      const mainRef = doc(db, 'tables', tableId.toString());
-      await safeSetDoc(mainRef, {
-        isOccupied: false,
-        currentBookingId: null,
-        mergedWith: deleteField(),
-        extraSeats: 0
-      }, { merge: true });
+      await safeCommitBatch(freeBatch);
 
       // 2. Mark booking finished if exists
       if (bId) {
@@ -2031,8 +2126,9 @@ export const dataService = {
           if (!booking || booking.status === 'finished' || booking.status === 'cancelled') {
             shouldFinish = true;
           } else {
-            const refDateStr = booking.bookingDate || (booking.seatedAt ? booking.seatedAt.split('T')[0] : booking.createdAt.split('T')[0]);
-            const seatedMs = booking.seatedAt ? new Date(booking.seatedAt).getTime() : new Date(booking.createdAt).getTime();
+            const seatedDateObj = parseToDate(booking.seatedAt) || parseToDate(booking.createdAt);
+            const refDateStr = booking.bookingDate || (seatedDateObj ? getLocalDateStr(seatedDateObj) : todayStr);
+            const seatedMs = seatedDateObj ? seatedDateObj.getTime() : nowMs;
             const elapsedHours = (nowMs - seatedMs) / (1000 * 3600);
             
             if (refDateStr < todayStr || elapsedHours > 14) {
@@ -2195,13 +2291,6 @@ export const dataService = {
 
   async seatWalkInDirectly(tableId: number, partySize: number, name = 'Walk-In', phone = '0400 000 000', childSeats = 0, handledBy?: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const tableDocRef = doc(db, 'tables', tableId.toString());
-      const tableSnap = await getDoc(tableDocRef);
-      if (!tableSnap.exists()) return { success: false, error: 'Table not found' };
-      const table = tableSnap.data() as Table;
-      if (table.isOccupied) return { success: false, error: 'Table is already occupied' };
-      if (table.isInactive) return { success: false, error: 'Table is inactive' };
-
       const bookingId = `bk-direct-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
       const handledByVal = handledBy || getSessionHandledBy();
       const newBooking: Booking = {
@@ -2223,16 +2312,45 @@ export const dataService = {
         ...(handledByVal ? { handledBy: handledByVal } : {})
       };
 
-      await safeSetDoc(doc(db, 'bookings', bookingId), newBooking);
-      await safeSetDoc(tableDocRef, { isOccupied: true, currentBookingId: bookingId }, { merge: true });
-      await this.updateAllWaitingEstimates();
+      const result = await safeRunTransaction(db, async (transaction) => {
+        const tableDocRef = doc(db, 'tables', tableId.toString());
+        const tableSnap = await transaction.get(tableDocRef);
+        if (!tableSnap.exists()) return { success: false, error: 'Table not found' };
+        const table = tableSnap.data() as Table;
+        if (table.isOccupied) return { success: false, error: 'Table is already occupied' };
+        if (table.isInactive) return { success: false, error: 'Table is inactive' };
 
-      return { success: true };
+        // Merge-group aware, same pattern as allocateTable: every other
+        // member must also be transactionally re-checked before committing.
+        const memberIds = table.mergeGroupTableIds && table.mergeGroupTableIds.length > 1
+          ? table.mergeGroupTableIds
+          : [tableId];
+        const otherIds = memberIds.filter((id) => id !== tableId);
+        const otherRefs = otherIds.map((id) => doc(db, 'tables', id.toString()));
+        const otherSnaps = await Promise.all(otherRefs.map((ref) => transaction.get(ref)));
+        for (const snap of otherSnaps) {
+          if (!snap.exists()) return { success: false, error: 'A merged table was not found.' };
+          const otherData = snap.data() as Table;
+          if (otherData.isOccupied) return { success: false, error: 'Table is already occupied' };
+          if (otherData.isInactive) return { success: false, error: 'Table is inactive' };
+        }
+
+        transaction.set(doc(db, 'bookings', bookingId), sanitizeOutgoingData(newBooking));
+        transaction.update(tableDocRef, { isOccupied: true, currentBookingId: bookingId });
+        otherRefs.forEach((ref) => transaction.update(ref, { isOccupied: true, currentBookingId: bookingId }));
+
+        return { success: true };
+      });
+
+      if (result.success) {
+        await this.updateAllWaitingEstimates();
+      }
+      return result;
     } catch (error) {
       console.error("seatWalkInDirectly error:", error);
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('justDosaWriteError', { 
-          detail: { message: "Something went wrong, please try again or see staff." } 
+        window.dispatchEvent(new CustomEvent('justDosaWriteError', {
+          detail: { message: "Something went wrong, please try again or see staff." }
         }));
       }
       return { success: false, error: 'Something went wrong, please try again or see staff.' };
@@ -2380,13 +2498,14 @@ export const dataService = {
 
   getDailyStats(): DailyStats {
     const bookings = this.getBookings();
-    const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
+    const todayStr = getLocalDateStr();
 
     const todayBookings = bookings.filter((b) => {
       if (b.status === 'cancelled' || b.status === 'no-show') return false;
-      const createdStr = b.createdAt.split('T')[0];
-      const seatedStr = b.seatedAt ? b.seatedAt.split('T')[0] : '';
+      const createdDate = parseToDate(b.createdAt);
+      const seatedDate = parseToDate(b.seatedAt);
+      const createdStr = createdDate ? getLocalDateStr(createdDate) : '';
+      const seatedStr = seatedDate ? getLocalDateStr(seatedDate) : '';
       return createdStr === todayStr || seatedStr === todayStr || b.status === 'seated' || b.status === 'finished';
     });
 
@@ -2397,7 +2516,10 @@ export const dataService = {
     const seatedWalkIns = todayBookings.filter((b) => b.seatedAt && (b.type === 'walk-in' || b.type === 'walkskin'));
     let totalWaitMins = 0;
     seatedWalkIns.forEach((b) => {
-      const waitMs = new Date(b.seatedAt!).getTime() - new Date(b.createdAt).getTime();
+      const seatedD = parseToDate(b.seatedAt);
+      const createdD = parseToDate(b.createdAt);
+      if (!seatedD || !createdD) return;
+      const waitMs = seatedD.getTime() - createdD.getTime();
       totalWaitMins += Math.max(1, Math.round(waitMs / 60000));
     });
     const avgWaitTimeMinutes = seatedWalkIns.length > 0 ? Math.round(totalWaitMins / seatedWalkIns.length) : 18;
@@ -2405,7 +2527,10 @@ export const dataService = {
     const finishedParties = todayBookings.filter((b) => b.finishedAt && b.seatedAt);
     let totalTurnMins = 0;
     finishedParties.forEach((b) => {
-      const turnMs = new Date(b.finishedAt!).getTime() - new Date(b.seatedAt!).getTime();
+      const finishedD = parseToDate(b.finishedAt);
+      const seatedD = parseToDate(b.seatedAt);
+      if (!finishedD || !seatedD) return;
+      const turnMs = finishedD.getTime() - seatedD.getTime();
       totalTurnMins += Math.max(10, Math.round(turnMs / 60000));
     });
     const avgTableTurnMinutes = finishedParties.length > 0 ? Math.round(totalTurnMins / finishedParties.length) : 42;
@@ -2416,7 +2541,8 @@ export const dataService = {
     };
 
     todayBookings.forEach((b) => {
-      const dateObj = new Date(b.createdAt);
+      const dateObj = parseToDate(b.createdAt);
+      if (!dateObj) return;
       const hour = `${dateObj.getHours().toString().padStart(2, '0')}:00`;
       hoursMap[hour] = (hoursMap[hour] || 0) + 1;
     });
