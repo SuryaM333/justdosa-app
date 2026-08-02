@@ -1610,7 +1610,7 @@ export const dataService = {
         await safeSetDoc(doc(db, 'bookings', bookingId), newBooking);
 
         if (newBooking.status === 'waiting') {
-          await this.updateAllWaitingEstimates();
+          this.updateAllWaitingEstimates(); // fire-and-forget: recalculates queue estimates in the background so the primary action (seat/finish/cancel/etc.) doesn't wait on a second Firestore round-trip before the UI updates
         }
 
         playNewBookingChime();
@@ -1810,7 +1810,7 @@ export const dataService = {
         await safeSetDoc(doc(db, 'bookings', bookingId), newBooking);
 
         if (newBooking.status === 'waiting') {
-          await this.updateAllWaitingEstimates();
+          this.updateAllWaitingEstimates(); // fire-and-forget: recalculates queue estimates in the background so the primary action (seat/finish/cancel/etc.) doesn't wait on a second Firestore round-trip before the UI updates
         }
 
         return newBooking;
@@ -1984,7 +1984,7 @@ export const dataService = {
       });
 
       if (result.success) {
-        await this.updateAllWaitingEstimates();
+        this.updateAllWaitingEstimates(); // fire-and-forget: recalculates queue estimates in the background so the primary action (seat/finish/cancel/etc.) doesn't wait on a second Firestore round-trip before the UI updates
         await this.syncSlotOccupancyForBookingId(bookingId);
       } else {
         cachedTables = prevTables;
@@ -2100,7 +2100,7 @@ export const dataService = {
         }
       }
 
-      await this.updateAllWaitingEstimates();
+      this.updateAllWaitingEstimates(); // fire-and-forget: recalculates queue estimates in the background so the primary action (seat/finish/cancel/etc.) doesn't wait on a second Firestore round-trip before the UI updates
       if (bId) {
         await this.syncSlotOccupancyForBookingId(bId);
       }
@@ -2162,7 +2162,7 @@ export const dataService = {
       }
 
       if (count > 0) {
-        await this.updateAllWaitingEstimates();
+        this.updateAllWaitingEstimates(); // fire-and-forget: recalculates queue estimates in the background so the primary action (seat/finish/cancel/etc.) doesn't wait on a second Firestore round-trip before the UI updates
       }
       return count;
     } catch (err) {
@@ -2211,7 +2211,7 @@ export const dataService = {
         status: 'waiting',
         createdAt: new Date().toISOString()
       }, { merge: true });
-      await this.updateAllWaitingEstimates();
+      this.updateAllWaitingEstimates(); // fire-and-forget: recalculates queue estimates in the background so the primary action (seat/finish/cancel/etc.) doesn't wait on a second Firestore round-trip before the UI updates
       await this.syncSlotOccupancyForBookingId(bookingId);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
@@ -2343,7 +2343,7 @@ export const dataService = {
       });
 
       if (result.success) {
-        await this.updateAllWaitingEstimates();
+        this.updateAllWaitingEstimates(); // fire-and-forget: recalculates queue estimates in the background so the primary action (seat/finish/cancel/etc.) doesn't wait on a second Firestore round-trip before the UI updates
       }
       return result;
     } catch (error) {
@@ -2388,7 +2388,7 @@ export const dataService = {
             noShowCount: (cust.noShowCount || 0) + 1
           }, { merge: true });
         }
-        await this.updateAllWaitingEstimates();
+        this.updateAllWaitingEstimates(); // fire-and-forget: recalculates queue estimates in the background so the primary action (seat/finish/cancel/etc.) doesn't wait on a second Firestore round-trip before the UI updates
         await this.syncSlotOccupancyForBookingId(bookingId);
       }
     } catch (error) {
@@ -2415,7 +2415,7 @@ export const dataService = {
             cancellationCount: (cust.cancellationCount || 0) + 1
           }, { merge: true });
         }
-        await this.updateAllWaitingEstimates();
+        this.updateAllWaitingEstimates(); // fire-and-forget: recalculates queue estimates in the background so the primary action (seat/finish/cancel/etc.) doesn't wait on a second Firestore round-trip before the UI updates
         await this.syncSlotOccupancyForBookingId(bookingId);
       }
     } catch (error) {
