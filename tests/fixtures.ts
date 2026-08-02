@@ -1,6 +1,6 @@
 import { test as base, expect, type Page } from '@playwright/test';
 import { initializeApp, deleteApp, type FirebaseApp } from 'firebase/app';
-import { getFirestore, connectFirestoreEmulator, doc, setDoc, getDoc, type Firestore } from 'firebase/firestore';
+import { getFirestore, connectFirestoreEmulator, doc, setDoc, getDoc, collection, getDocs, type Firestore } from 'firebase/firestore';
 import type { Booking, Table, Customer } from '../src/types';
 
 export const PROJECT_ID = 'just-dosa';
@@ -55,6 +55,11 @@ export class SeedClient {
   async getTable(id: number): Promise<Table | undefined> {
     const snap = await getDoc(doc(this.db, 'tables', id.toString()));
     return snap.exists() ? (snap.data() as Table) : undefined;
+  }
+
+  async listBookings(): Promise<Booking[]> {
+    const snap = await getDocs(collection(this.db, 'bookings'));
+    return snap.docs.map((d) => d.data() as Booking);
   }
 
   async setSettings(partial: Record<string, any>): Promise<void> {
