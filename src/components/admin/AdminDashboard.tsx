@@ -12,6 +12,7 @@ import { SettingsTab } from './SettingsTab';
 import { NewBookingModal } from './NewBookingModal';
 import { playNewBookingChime } from '../../utils/sound';
 import { getLocalDateStr } from '../../utils/dateUtils';
+import { requestNotificationPermission, showStaffNotification } from '../../utils/notifications';
 
 interface AdminDashboardProps {
   adminRole: AdminRole;
@@ -48,13 +49,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole }) => 
     }
   }, [adminRole]);
 
-  const prevPendingIdsRef = useRef<string[]>([]);
+  // Every booking currently flagged isNewAlert (walk-in waiting OR remote
+  // pending) that staff hasn't looked at yet -- previous run's snapshot, so
+  // we can tell "genuinely new since last render" apart from "still
+  // unhandled from before" (see the alert-if-still-unacknowledged effect
+  // further down, which re-uses this same isNewAlert signal).
+  const prevNewAlertIdsRef = useRef<string[]>([]);
+  const hasMountedAlertsRef = useRef(false);
 
-  // Real-time tab title badge count (e.g. "(3) Just Dosa") & Sound/vibration chime
+  // Ask for OS-level notification permission once per browser profile, right
+  // after the dashboard mounts (a successful PIN entry is the user gesture).
+  useEffect(() => {
+    requestNotificationPermission();
+  }, []);
+
+  // Real-time tab title badge count (e.g. "(3) Just Dosa")
   useEffect(() => {
     const currentPending = bookings.filter((b) => b.status === 'pending');
-    const currentPendingIds = currentPending.map((b) => b.id);
-    const prevPendingIds = prevPendingIdsRef.current;
 
     // Badge count in title
     if (currentPending.length > 0) {
@@ -71,21 +82,80 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole }) => 
         (navigator as any).clearAppBadge().catch((e: any) => console.error(e));
       }
     }
-
-    // New booking check
-    const hasNewPending = currentPendingIds.some((id) => !prevPendingIds.includes(id));
-    if (hasNewPending && prevPendingIds.length > 0) {
-      playNewBookingChime();
-    }
-
-    prevPendingIdsRef.current = currentPendingIds;
   }, [bookings]);
+
+  // Sound + OS notification for anything newly needing staff attention --
+  // both a new walk-in joining the queue (status 'waiting') and a new
+  // remote reservation request (status 'pending') set isNewAlert, so this
+  // catches both instead of only remote requests like the old pending-only
+  // check did (the actual cause of "no sound when someone walks in").
+  useEffect(() => {
+    const currentNewAlerts = bookings.filter((b) => b.isNewAlert && (b.status === 'waiting' || b.status === 'pending'));
+    const currentIds = currentNewAlerts.map((b) => b.id);
+    const prevIds = prevNewAlertIdsRef.current;
+
+    const newlyArrived = currentNewAlerts.filter((b) => !prevIds.includes(b.id));
+    if (newlyArrived.length > 0 && hasMountedAlertsRef.current) {
+      playNewBookingChime();
+      const first = newlyArrived[0];
+      const title = first.status === 'waiting' ? 'New walk-in waiting' : 'New booking request';
+      const body = newlyArrived.length === 1
+        ? `${first.firstName} ${first.lastName || ''} — party of ${first.partySize}`.trim()
+        : `${newlyArrived.length} new parties need attention`;
+      showStaffNotification(title, body);
+    }
+    hasMountedAlertsRef.current = true;
+
+    prevNewAlertIdsRef.current = currentIds;
+  }, [bookings]);
+
+  // If something stays unacknowledged (isNewAlert still true -- staff hasn't
+  // opened that tab), re-alert every 2.5 minutes rather than only once on
+  // arrival, so a busy shift can't silently miss someone. The interval is
+  // set up once (bookings updates every few seconds via polling/Firestore,
+  // which would otherwise reset a [bookings]-dependent interval before it
+  // ever completed a full 2.5-minute countdown) and reads the latest
+  // bookings via a ref instead of closing over a specific render's value.
+  const bookingsRef = useRef<Booking[]>(bookings);
+  useEffect(() => {
+    bookingsRef.current = bookings;
+  }, [bookings]);
+
+  useEffect(() => {
+    const REMINDER_INTERVAL_MS = 150000; // 2.5 minutes
+    const intervalId = setInterval(() => {
+      const stillUnhandled = bookingsRef.current.filter((b) => b.isNewAlert && (b.status === 'waiting' || b.status === 'pending'));
+      if (stillUnhandled.length > 0) {
+        playNewBookingChime();
+        showStaffNotification(
+          'Still waiting for a response',
+          `${stillUnhandled.length} ${stillUnhandled.length === 1 ? 'party is' : 'parties are'} still unacknowledged.`
+        );
+      }
+    }, REMINDER_INTERVAL_MS);
+    return () => clearInterval(intervalId);
+  }, []);
 
   const loadData = () => {
     setTables(dataService.getTables());
     setBookings(dataService.getBookings());
     setCustomers(dataService.getCustomers());
   };
+
+  // Forces a re-render every few seconds purely so time-based displays
+  // ("Waited: 00:14", "seated 6 mins ago") keep ticking -- it must NOT call
+  // loadData(), which would replace tables/bookings/customers with new array
+  // references (getTables()/getBookings() always .filter() a fresh array,
+  // even when nothing changed) and cascade a full-tree re-render + any
+  // tables/bookings-keyed useMemo recompute every 3s regardless of whether
+  // any real data changed. Actual data updates are already immediate and
+  // exact via dataService.subscribe() below -- this only needs to nudge a
+  // re-render, not refetch.
+  const [, setClockTick] = useState(0);
+  useEffect(() => {
+    const intervalId = setInterval(() => setClockTick((t) => t + 1), 3000);
+    return () => clearInterval(intervalId);
+  }, []);
 
   useEffect(() => {
     loadData();
@@ -100,12 +170,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole }) => 
         return onlineStatus;
       });
     });
-    const intervalId = setInterval(() => {
-      loadData();
-    }, 3000);
     return () => {
       unsubscribe();
-      clearInterval(intervalId);
     };
   }, []);
 

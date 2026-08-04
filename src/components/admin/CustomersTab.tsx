@@ -27,24 +27,29 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
   }, [searchInput]);
 
   // Modal / action states
-  const [customerToDelete, setCustomerToDelete] = useState<Customer | null>(null);
+  const [customerToDelete, setCustomerToDelete] = useState<(Customer & { _docId: string }) | null>(null);
   const [mergePrimary, setMergePrimary] = useState<Customer | null>(null);
   const [mergeSecondary, setMergeSecondary] = useState<Customer | null>(null);
   const [keepPrimaryName, setKeepPrimaryName] = useState(true);
 
   // Profile Edit states
-  const [customerToEdit, setCustomerToEdit] = useState<Customer | null>(null);
+  const [customerToEdit, setCustomerToEdit] = useState<(Customer & { _docId: string }) | null>(null);
   const [isVip, setIsVip] = useState(false);
   const [allergies, setAllergies] = useState('');
   const [notes, setNotes] = useState('');
 
-  const customerList: Customer[] = Object.values(customers);
+  // Anonymous walk-ins (no phone collected) are keyed by booking id, not
+  // phone, so every list/lookup below needs the real doc id, not just
+  // `phone` -- otherwise every anonymous record (all sharing phone: '')
+  // would collide as "duplicates" of each other and share one React key.
+  const customerList: (Customer & { _docId: string })[] = Object.entries(customers).map(([docId, c]: [string, Customer]) => ({ ...c, _docId: docId }));
 
   const getCleanPhone = (p: string) => p.replace(/\D/g, '');
 
-  const getDuplicates = (cust: Customer) => {
+  const getDuplicates = (cust: Customer & { _docId: string }) => {
+    if (cust.isAnonymous || !cust.phone) return [];
     const cleaned = getCleanPhone(cust.phone);
-    return customerList.filter(other => other.phone !== cust.phone && getCleanPhone(other.phone) === cleaned);
+    return customerList.filter(other => !other.isAnonymous && other.phone !== cust.phone && getCleanPhone(other.phone) === cleaned);
   };
 
   const isOwner = adminRole === 'owner';
@@ -85,7 +90,7 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
 
   const handleDeleteConfirm = () => {
     if (!customerToDelete) return;
-    dataService.deleteCustomer(customerToDelete.phone);
+    dataService.deleteCustomer(customerToDelete._docId);
     setCustomerToDelete(null);
     if (onRefresh) onRefresh();
   };
@@ -100,7 +105,7 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
 
   const handleSaveProfile = async () => {
     if (!customerToEdit) return;
-    await dataService.updateCustomer(customerToEdit.phone, {
+    await dataService.updateCustomer(customerToEdit._docId, {
       isVip,
       allergies: allergies.trim() || undefined,
       notes: notes.trim() || undefined
@@ -257,10 +262,17 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
 
               const duplicateRecords = getDuplicates(cust);
               const hasDup = duplicateRecords.length > 0;
+              // Anonymous walk-ins are keyed by booking id (see dataService's
+              // finishSeatedParty), so their one visit is matched by that id
+              // instead of phone (every anonymous record shares phone: '').
+              const custBookings = (bookings || []).filter((b) =>
+                cust.isAnonymous ? cust._docId === `anon-${b.id}` : b.phone === cust.phone
+              );
+              const sourceLabel = (s?: string) => s === 'online' ? 'QR / Online' : s === 'phone/staff' ? 'Phone' : s === 'walk-in' ? 'Walk-in' : null;
 
               return (
                 <div
-                  key={cust.phone}
+                  key={cust._docId}
                   className="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-[#F5F2EA]/50 dark:hover:bg-[#1C1917]/50 transition-colors"
                 >
                   <div className="flex items-start gap-3.5">
@@ -288,6 +300,11 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
                             <span>REGULAR</span>
                           </span>
                         )}
+                        {cust.isAnonymous && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700" title="Walk-in seated without a phone number -- can't be matched to future visits">
+                            <span>Walk-in (no phone)</span>
+                          </span>
+                        )}
                         {cust.noShowCount > 0 && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-red-100 dark:bg-red-950/80 text-red-700 dark:text-red-300 border border-red-300 dark:border-red-800" title="Has prior no-shows">
                             <AlertTriangle className="w-3 h-3" />
@@ -304,7 +321,7 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
 
                       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[#6B5E4C] dark:text-[#B8ACA0] font-medium">
                         <span className="font-mono text-[#2D2926] dark:text-zinc-300">
-                          {isOwner ? cust.phone : '•••• — Manager access required'}
+                          {!isOwner ? '•••• — Manager access required' : (cust.phone || '—')}
                         </span>
                         <span>Total Visits: <strong className="text-[#8B4513] dark:text-[#D2B48C] font-bold">{cust.totalVisits}</strong></span>
                         <span>Last Visit: <strong className="text-[#2D2926] dark:text-zinc-300">{isOwner ? formatDate(cust.lastVisitDate) : '••••'}</strong></span>
@@ -336,14 +353,13 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
                       )}
 
                       {/* Past Visits / Booking History (Owner only) */}
-                      {isOwner && bookings && bookings.filter(b => b.phone === cust.phone).length > 0 && (
+                      {isOwner && custBookings.length > 0 && (
                         <div className="mt-2.5 pt-2 border-t border-dashed border-[#E8E2D2] dark:border-[#3D352E]/65 max-w-lg">
                           <span className="text-[10px] uppercase font-bold text-[#6B5E4C] dark:text-[#B8ACA0] block mb-1">
                             Visit History & Staff Logs
                           </span>
                           <div className="flex flex-col gap-1 max-h-24 overflow-y-auto pr-1">
-                            {bookings
-                              .filter(b => b.phone === cust.phone)
+                            {custBookings
                               .sort((a, b) => {
                                 const timeA = parseToDate(a.createdAt)?.getTime() || 0;
                                 const timeB = parseToDate(b.createdAt)?.getTime() || 0;
@@ -375,6 +391,11 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
                                     }`}>
                                       {b.status}
                                     </span>
+                                    {sourceLabel(b.source) && (
+                                      <span className="px-1 py-0.5 rounded text-[9px] font-bold uppercase bg-blue-500/10 text-blue-700 dark:text-blue-400" title="How this booking was made">
+                                        {sourceLabel(b.source)}
+                                      </span>
+                                    )}
                                     {b.handledBy && (
                                       <span className="text-zinc-500 text-[10px] italic">
                                         by {b.handledBy}
@@ -422,7 +443,7 @@ export const CustomersTab: React.FC<CustomersTabProps> = ({ customers, bookings,
                         </button>
                       )}
 
-                      {isOwner && (
+                      {isOwner && cust.phone && (
                         <a
                           href={waUrl}
                           target="_blank"

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Utensils, Clock, Calendar, Users, Baby, Phone, MessageSquare, CheckCircle2, Sparkles, ArrowLeft, AlertCircle, XCircle, QrCode, ExternalLink } from 'lucide-react';
 import { Booking } from '../../types';
@@ -8,10 +8,14 @@ import { formatAusMobile, isValidAusMobile, cleanPhoneNumber, getWhatsAppUrl } f
 import { formatPartyBreakdown } from '../../utils/bookingUtils';
 import { safeFormatValidUntil } from '../../utils/dateUtils';
 import { resolveGroupMembers, getGroupCombinedName, getGroupCombinedShortCode, getGroupCombinedOrderingUrl } from '../../utils/mergeUtils';
-import { WaitingCarousel } from './WaitingCarousel';
 import { LOGO_BASE64 } from '../logoBase64';
 import { TimeWheelPicker, getAvailableTimeSlotsShared } from '../TimeWheelPicker';
 import { QuickNotesSelector } from '../QuickNotesSelector';
+
+// Lazy-loaded: not needed for first paint or the booking form itself, only
+// after a customer joins the queue or submits a reservation -- keeps its
+// dish images/animation code out of the initial customer-facing bundle.
+const WaitingCarousel = lazy(() => import('./WaitingCarousel').then((m) => ({ default: m.WaitingCarousel })));
 
 export const CustomerView: React.FC = () => {
   const [showIntro, setShowIntro] = useState(() => {
@@ -87,6 +91,7 @@ export const CustomerView: React.FC = () => {
   const [saturdayMenuType, setSaturdayMenuType] = useState<'regular' | 'kalyana' | null>(null);
   const [kalyanaSlot, setKalyanaSlot] = useState(() => dataService.getKalyanaSlots()[0]?.range || 'Slot 1: 11:00am-12:30pm');
   const [errorMsg, setErrorMsg] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [showChangeForm, setShowChangeForm] = useState(false);
   const [changeNote, setChangeNote] = useState('');
   const [allergies, setAllergies] = useState('');
@@ -185,9 +190,11 @@ export const CustomerView: React.FC = () => {
 
   // Subscribe to settings and tables changes in the dataService to trigger re-renders
   const [settingsTick, setSettingsTick] = useState(0);
+  const [isOnline, setIsOnline] = useState(() => dataService.isOnline());
   useEffect(() => {
     const unsubscribe = dataService.subscribe(() => {
       setSettingsTick((t) => t + 1);
+      setIsOnline(dataService.isOnline());
     });
     return () => {
       unsubscribe();
@@ -300,6 +307,11 @@ export const CustomerView: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // A slow network plus an impatient double-tap could otherwise fire two
+    // createBooking calls before the first one's disabled-button state ever
+    // reflected in the DOM -- guard at the top of the handler itself, not
+    // just the button's disabled attribute.
+    if (isSubmitting) return;
     if (!firstName.trim() || !lastName.trim()) {
       setErrorMsg('Please enter both first and last name.');
       return;
@@ -345,6 +357,7 @@ export const CustomerView: React.FC = () => {
       }
     }
 
+    setIsSubmitting(true);
     try {
       const newBk = await dataService.createBooking({
         firstName: firstName.trim(),
@@ -384,6 +397,8 @@ export const CustomerView: React.FC = () => {
       } else {
         setErrorMsg('Something went wrong while securing your booking. Please try again.');
       }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -440,6 +455,21 @@ export const CustomerView: React.FC = () => {
     handleResetSession();
   };
 
+  // Shown at the top of every screen below when this device has lost its
+  // connection to Firestore -- previously there was no offline awareness
+  // anywhere on the customer side (contrast the admin dashboard, which
+  // already has this), so a customer on flaky venue wifi had no indication
+  // their queue position/table-ready status could be stale until an action
+  // silently failed.
+  const offlineBanner = !isOnline && (
+    <div className="w-full max-w-md mx-auto mb-4 bg-amber-600 dark:bg-amber-700 text-white px-4 py-3 rounded-2xl flex items-center gap-2.5 shadow-md animate-pulse">
+      <span className="w-2.5 h-2.5 bg-white rounded-full animate-ping shrink-0" />
+      <span className="text-sm font-semibold tracking-wide">
+        Connection lost — this screen may be out of date until you're back online.
+      </span>
+    </div>
+  );
+
   // Render Status screen for walk-ins
   if (activeTab === 'status' && activeBooking) {
     const isReady = activeBooking.status === 'seated';
@@ -459,6 +489,7 @@ export const CustomerView: React.FC = () => {
 
     return (
       <div className="min-h-[calc(100vh-4rem)] bg-[#1C1917] py-8 px-4 flex flex-col items-center justify-center">
+        {offlineBanner}
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -624,7 +655,9 @@ export const CustomerView: React.FC = () => {
               </div>
 
               {/* Premium Signature Dish Showcase slider */}
-              <WaitingCarousel />
+              <Suspense fallback={null}>
+                <WaitingCarousel />
+              </Suspense>
 
               <div className="bg-[#1C1917] rounded-xl p-3 text-left text-xs text-[#B8ACA0] mb-6 border border-[#3D352E]">
                 <div className="flex items-center gap-2 mb-1 text-white font-semibold">
@@ -689,6 +722,7 @@ export const CustomerView: React.FC = () => {
 
     return (
       <div className="min-h-[calc(100vh-4rem)] bg-[#1C1917] py-8 px-4 flex flex-col items-center justify-center">
+        {offlineBanner}
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -894,7 +928,11 @@ export const CustomerView: React.FC = () => {
               </div>
 
               {/* Something to look at while you wait on your reservation date */}
-              {!isCancelled && !isDeclined && <WaitingCarousel />}
+              {!isCancelled && !isDeclined && (
+                <Suspense fallback={null}>
+                  <WaitingCarousel />
+                </Suspense>
+              )}
 
               {/* Action Buttons */}
               <div className="space-y-3 mb-6">
@@ -1042,6 +1080,8 @@ export const CustomerView: React.FC = () => {
           animate="visible"
           className="max-w-xl mx-auto relative z-10"
         >
+          {offlineBanner}
+
           {/* Active Booking Top Banner */}
           {activeBookingId && activeBooking && !['finished', 'cancelled', 'declined', 'no-show'].includes(activeBooking.status) && (
             <motion.div
@@ -1737,7 +1777,7 @@ export const CustomerView: React.FC = () => {
                 <button
                   type="submit"
                   disabled={
-                    (getDayOfWeek(bookingDate) === 2 && activeTab === 'remote')
+                    isSubmitting || (getDayOfWeek(bookingDate) === 2 && activeTab === 'remote')
                   }
                   className={`w-full py-4 rounded-xl font-bold text-white text-base shadow-lg transition-all transform active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
                     activeTab === 'walk-in'
@@ -1745,7 +1785,12 @@ export const CustomerView: React.FC = () => {
                       : 'bg-[#8B4513] hover:bg-[#72380E] shadow-[#8B4513]/20'
                   }`}
                 >
-                  <span>{activeTab === 'walk-in' ? 'Join Live Waitlist' : 'Confirm Table Reservation'}</span>
+                  {isSubmitting && (
+                    <span className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin shrink-0" />
+                  )}
+                  <span>
+                    {isSubmitting ? 'Submitting…' : activeTab === 'walk-in' ? 'Join Live Waitlist' : 'Confirm Table Reservation'}
+                  </span>
                 </button>
               </>
             )}

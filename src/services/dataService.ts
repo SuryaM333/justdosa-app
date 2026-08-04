@@ -1203,16 +1203,13 @@ export const dataService = {
   },
 
   async finishTable(tableId: number): Promise<{ success: boolean; error?: string }> {
-    try {
-      await this.finishSeatedParty(tableId);
-      return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message || 'Failed to finish table' };
-    }
+    return this.finishSeatedParty(tableId);
   },
 
   async addQuickWalkinAndSeat(data: { tableId: number; partySize: number; name?: string; phone?: string; serverName?: string }): Promise<{ success: boolean; error?: string }> {
-    return this.seatWalkInDirectly(data.tableId, data.partySize, data.name || 'Walk-In', data.phone || '0400 000 000', 0, data.serverName);
+    // No fake default phone here: a shared placeholder would silently merge
+    // every phone-less walk-in into one "customer" (see seatWalkInDirectly).
+    return this.seatWalkInDirectly(data.tableId, data.partySize, data.name || 'Walk-In', data.phone || '', 0, data.serverName);
   },
 
   getLandmarks(): LandmarkPosition[] {
@@ -1355,7 +1352,8 @@ export const dataService = {
 
   async updateCustomer(phoneKey: string, updates: Partial<Customer>) {
     try {
-      const cleaned = cleanPhoneNumber(phoneKey);
+      // Same anon-{bookingId} doc-id exception as deleteCustomer above.
+      const cleaned = phoneKey.startsWith('anon-') ? phoneKey : cleanPhoneNumber(phoneKey);
       await safeSetDoc(doc(db, 'customers', cleaned), updates, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'customers');
@@ -1607,6 +1605,7 @@ export const dataService = {
             notes: data.notes || '',
             allergies: data.allergies || '',
             agreedConditions: data.agreedConditions || null,
+            source: 'online',
           };
 
           const bookingRef = doc(db, 'bookings', bookingId);
@@ -1680,6 +1679,7 @@ export const dataService = {
           notes: data.notes || '',
           allergies: data.allergies || '',
           agreedConditions: data.agreedConditions || null,
+          source: 'online',
         };
 
         if (newBooking.type === 'walk-in') {
@@ -2086,7 +2086,16 @@ export const dataService = {
     }
   },
 
-  async finishSeatedParty(tableId: number, handledBy?: string): Promise<void> {
+  async finishSeatedParty(tableId: number, handledBy?: string): Promise<{ success: boolean; error?: string }> {
+    // Snapshot before mutating (same pattern as allocateTable) so a failed
+    // write can be cleanly rolled back. Without this, the optimistic update
+    // below mutates the cached Table/Booking objects in place -- there was
+    // no way to undo it on failure, so a failed "Finish" left the floor plan
+    // showing a table as free while Firestore still had it occupied, a real
+    // double-seat risk.
+    const prevTables = JSON.parse(JSON.stringify(cachedTables));
+    const prevBookings = JSON.parse(JSON.stringify(cachedBookings));
+
     const tableToFinish = cachedTables.find((t) => t.id === tableId);
     const bId = tableToFinish?.currentBookingId;
 
@@ -2175,6 +2184,27 @@ export const dataService = {
                 branchId: getActiveBranchId(),
               });
             }
+          } else {
+            // Walk-in seated with no phone collected: there's no reliable
+            // identifier to match them against future visits, so give this
+            // one its own record (keyed by booking id, guaranteed unique)
+            // rather than silently merging every phone-less walk-in into a
+            // single shared "customer" -- that was the actual cause of a
+            // single walk-in's total-visits count inflating to 10-15+ while
+            // really representing many different, unrelated people.
+            const customerDocRef = doc(db, 'customers', `anon-${booking.id}`);
+            await safeSetDoc(customerDocRef, {
+              phone: '',
+              firstName: booking.firstName,
+              lastName: booking.lastName,
+              totalVisits: 1,
+              lastVisitDate: finishedAt,
+              noShowCount: 0,
+              cancellationCount: 0,
+              whatsappOptIn: false,
+              branchId: getActiveBranchId(),
+              isAnonymous: true,
+            });
           }
         }
       }
@@ -2183,9 +2213,22 @@ export const dataService = {
       if (bId) {
         await this.syncSlotOccupancyForBookingId(bId);
       }
+      return { success: true };
     } catch (error) {
+      // Roll back the optimistic update: without this, a failed write left
+      // the floor plan showing the table as free while Firestore still had
+      // it occupied -- a real double-seat risk if staff then allocated a
+      // new party onto what they believed was a vacant table.
+      cachedTables = prevTables;
+      cachedBookings = prevBookings;
+      notifyListeners();
       console.error("Error in finishSeatedParty:", error);
-      handleFirestoreError(error, OperationType.WRITE, `tables/${tableId}`);
+      try {
+        handleFirestoreError(error, OperationType.WRITE, `tables/${tableId}`); // always throws for WRITE ops
+      } catch (rethrown) {
+        return { success: false, error: rethrown instanceof Error ? rethrown.message : 'Failed to finish table' };
+      }
+      return { success: false, error: 'Failed to finish table' };
     }
   },
 
@@ -2368,13 +2411,17 @@ export const dataService = {
     }
   },
 
-  async seatWalkInDirectly(tableId: number, partySize: number, name = 'Walk-In', phone = '0400 000 000', childSeats = 0, handledBy?: string): Promise<{ success: boolean; error?: string }> {
+  async seatWalkInDirectly(tableId: number, partySize: number, name = 'Walk-In', phone = '', childSeats = 0, handledBy?: string): Promise<{ success: boolean; error?: string }> {
     try {
       const bookingId = `bk-direct-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`;
       const handledByVal = handledBy || getSessionHandledBy();
+      // No fake default phone: leaving it blank when staff doesn't collect
+      // one keeps each phone-less walk-in distinct instead of silently
+      // merging them all into one shared "customer" (see finishSeatedParty's
+      // customer upsert, which keys anonymous guests off the booking id).
       const newBooking: Booking = {
         id: bookingId,
-        phone: formatAusMobile(phone),
+        phone: phone ? formatAusMobile(phone) : '',
         firstName: name,
         lastName: '',
         partySize,
@@ -2382,6 +2429,7 @@ export const dataService = {
         whatsappOptIn: false,
         type: 'walk-in',
         status: 'seated',
+        source: 'walk-in',
         createdAt: new Date().toISOString(),
         seatedAt: new Date().toISOString(),
         tableId,
@@ -2459,13 +2507,15 @@ export const dataService = {
         await safeSetDoc(docRef, bookingUpdate, { merge: true });
 
         const cleaned = cleanPhoneNumber(booking.phone);
-        const customerDocRef = doc(db, 'customers', cleaned);
-        const custSnap = await getDoc(customerDocRef);
-        if (custSnap.exists()) {
-          const cust = custSnap.data() as Customer;
-          await safeSetDoc(customerDocRef, {
-            noShowCount: (cust.noShowCount || 0) + 1
-          }, { merge: true });
+        if (cleaned) {
+          const customerDocRef = doc(db, 'customers', cleaned);
+          const custSnap = await getDoc(customerDocRef);
+          if (custSnap.exists()) {
+            const cust = custSnap.data() as Customer;
+            await safeSetDoc(customerDocRef, {
+              noShowCount: (cust.noShowCount || 0) + 1
+            }, { merge: true });
+          }
         }
         this.updateAllWaitingEstimates(); // fire-and-forget: recalculates queue estimates in the background so the primary action (seat/finish/cancel/etc.) doesn't wait on a second Firestore round-trip before the UI updates
         await this.syncSlotOccupancyForBookingId(bookingId);
@@ -2486,13 +2536,15 @@ export const dataService = {
         }, { merge: true });
 
         const cleaned = cleanPhoneNumber(booking.phone);
-        const customerDocRef = doc(db, 'customers', cleaned);
-        const custSnap = await getDoc(customerDocRef);
-        if (custSnap.exists()) {
-          const cust = custSnap.data() as Customer;
-          await safeSetDoc(customerDocRef, {
-            cancellationCount: (cust.cancellationCount || 0) + 1
-          }, { merge: true });
+        if (cleaned) {
+          const customerDocRef = doc(db, 'customers', cleaned);
+          const custSnap = await getDoc(customerDocRef);
+          if (custSnap.exists()) {
+            const cust = custSnap.data() as Customer;
+            await safeSetDoc(customerDocRef, {
+              cancellationCount: (cust.cancellationCount || 0) + 1
+            }, { merge: true });
+          }
         }
         this.updateAllWaitingEstimates(); // fire-and-forget: recalculates queue estimates in the background so the primary action (seat/finish/cancel/etc.) doesn't wait on a second Firestore round-trip before the UI updates
         await this.syncSlotOccupancyForBookingId(bookingId);
@@ -2650,7 +2702,10 @@ export const dataService = {
 
   async deleteCustomer(phoneKey: string) {
     try {
-      const cleaned = cleanPhoneNumber(phoneKey);
+      // Anonymous walk-in records are keyed by "anon-{bookingId}", not a
+      // phone number -- cleanPhoneNumber would strip the letters/dashes and
+      // target the wrong (or an invalid) doc, so pass those through as-is.
+      const cleaned = phoneKey.startsWith('anon-') ? phoneKey : cleanPhoneNumber(phoneKey);
       await safeDeleteDoc(doc(db, 'customers', cleaned));
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `customers/${phoneKey}`);

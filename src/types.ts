@@ -5,7 +5,7 @@ export type BookingStatus = 'waiting' | 'pending' | 'confirmed' | 'declined' | '
 export type AdminRole = 'staff' | 'owner';
 
 export interface Customer {
-  phone: string; // Keyed by phone (e.g., "0412 345 678")
+  phone: string; // Keyed by phone (e.g., "0412 345 678"); '' for anonymous walk-ins (see isAnonymous)
   firstName: string;
   lastName: string;
   totalVisits: number;
@@ -17,6 +17,11 @@ export interface Customer {
   isVip?: boolean;
   notes?: string;
   allergies?: string;
+  /** True for a walk-in seated without ever providing a phone number. Such
+   *  guests can't be reliably matched across visits, so each one gets its
+   *  own record (keyed by booking id, not phone) instead of being silently
+   *  merged into a shared "no phone" identity -- totalVisits always stays 1. */
+  isAnonymous?: boolean;
 }
 
 export interface Booking {
@@ -46,7 +51,7 @@ export interface Booking {
   branchId?: string;
   isKalyanaVirundhu?: boolean;
   kalyanaSlot?: string;
-  source?: 'online' | 'phone/staff';
+  source?: 'online' | 'phone/staff' | 'walk-in';
   alternativeDate?: string;
   alternativeTime?: string;
   alternativeIsKalyana?: boolean;

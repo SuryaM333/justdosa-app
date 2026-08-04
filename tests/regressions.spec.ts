@@ -192,4 +192,79 @@ test.describe('Regression guards', () => {
     await enterPin(page, '2468');
     await expect(page.getByRole('button', { name: /edit floor plan/i })).toBeVisible();
   });
+
+  test('two different phone-less walk-ins never get merged into one inflated customer record', async ({ page, seed }) => {
+    // Regression: Quick Seat's phone field is optional, and used to default
+    // to a shared literal placeholder ('0400 000 000') when left blank --
+    // every such walk-in collapsed into the SAME customer doc, so two
+    // unrelated guests would incorrectly appear as one person with
+    // totalVisits inflating on every unrelated walk-in's finish.
+    await seedDefaultTables(seed);
+    await loginAsOwner(page);
+
+    // Quick-seat guest #1 on Table 1, no phone.
+    await page.getByText('Table 1', { exact: true }).click();
+    await expect(page.getByText(/quick seat — table 1/i)).toBeVisible();
+    await page.getByPlaceholder('e.g., Rajesh').fill('Priya');
+    await page.getByRole('button', { name: /seat party now/i }).click();
+    await expect(page.getByText(/quick seat — table 1/i)).toHaveCount(0);
+
+    // Quick-seat guest #2 on Table 2, also no phone.
+    await page.getByText('Table 2', { exact: true }).click();
+    await expect(page.getByText(/quick seat — table 2/i)).toBeVisible();
+    await page.getByPlaceholder('e.g., Rajesh').fill('Karthik');
+    await page.getByRole('button', { name: /seat party now/i }).click();
+    await expect(page.getByText(/quick seat — table 2/i)).toHaveCount(0);
+
+    // Finish both -- this is where the old code upserted a shared customer record.
+    await page.getByText('Table 1', { exact: true }).click();
+    await page.getByRole('button', { name: /mark party finished/i }).click();
+    await page.getByText('Table 2', { exact: true }).click();
+    await page.getByRole('button', { name: /mark party finished/i }).click();
+
+    await page.getByRole('button', { name: /customer data/i }).click();
+    await expect(page.getByText(/priya/i).first()).toBeVisible();
+    await expect(page.getByText(/karthik/i).first()).toBeVisible();
+    // Two distinct records, each correctly showing exactly 1 visit -- not
+    // one shared record showing 2 (or more, across other tests' walk-ins).
+    await expect(page.getByText(/total visits: 1/i)).toHaveCount(2);
+    await expect(page.getByText(/walk-in \(no phone\)/i)).toHaveCount(2);
+  });
+
+  test('staff get a browser notification when a new walk-in joins the queue, not just for remote booking requests', async ({ browser, seed }) => {
+    // Regression: the old chime-trigger effect only watched status==='pending'
+    // (remote reservation requests) -- a new walk-in (status 'waiting') never
+    // made a sound or notification on the staff's own device at all.
+    const context = await browser.newContext({ permissions: ['notifications'] });
+    const page = await context.newPage();
+    await page.addInitScript(() => {
+      (window as any).__notifications = [];
+      class FakeNotification {
+        static permission = 'granted';
+        static requestPermission = async () => 'granted';
+        constructor(title: string, options?: any) {
+          (window as any).__notifications.push({ title, body: options?.body });
+        }
+        onclick: (() => void) | null = null;
+        close() {}
+      }
+      (window as any).Notification = FakeNotification;
+    });
+
+    try {
+      await seedDefaultTables(seed);
+      await loginAsOwner(page);
+      // Let the mount-time permission request + first render settle before
+      // the "genuinely new" comparison baseline is captured.
+      await page.waitForTimeout(500);
+
+      await seed.setBooking(makeBooking({ firstName: 'NotifyMe', lastName: 'Guest', status: 'waiting', type: 'walk-in', isNewAlert: true }));
+
+      await expect.poll(() => page.evaluate(() => (window as any).__notifications.length)).toBeGreaterThan(0);
+      const notifications = await page.evaluate(() => (window as any).__notifications);
+      expect(notifications.some((n: any) => /walk-in/i.test(n.title))).toBe(true);
+    } finally {
+      await context.close();
+    }
+  });
 });

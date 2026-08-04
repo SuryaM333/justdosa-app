@@ -1,5 +1,5 @@
 import React from 'react';
-import { Users, Baby, Phone, Clock, MessageSquare, Check, Utensils, ExternalLink, Sparkles } from 'lucide-react';
+import { Users, Baby, Phone, Clock, MessageSquare, Check, Utensils, ExternalLink, Sparkles, AlertTriangle } from 'lucide-react';
 import { Booking, Table } from '../../types';
 import { dataService } from '../../services/dataService';
 import { getWhatsAppUrl } from '../../utils/phone';
@@ -16,6 +16,8 @@ interface SeatedTabProps {
 export const SeatedTab: React.FC<SeatedTabProps> = ({ bookings, tables, onRefresh }) => {
   const isOnline = dataService.isOnline();
   const [, setTick] = React.useState(0);
+  const [finishingTableId, setFinishingTableId] = React.useState<number | null>(null);
+  const [finishError, setFinishError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const timer = setInterval(() => {
@@ -32,10 +34,20 @@ export const SeatedTab: React.FC<SeatedTabProps> = ({ bookings, tables, onRefres
       return timeB - timeA;
     });
 
-  const handleFinish = (tableId?: number, name?: string) => {
-    if (!tableId) return;
-    dataService.finishSeatedParty(tableId);
-    onRefresh();
+  const handleFinish = async (tableId?: number, name?: string) => {
+    if (!tableId || finishingTableId !== null) return;
+    setFinishingTableId(tableId);
+    setFinishError(null);
+    try {
+      const res = await dataService.finishSeatedParty(tableId);
+      if (!res.success) {
+        setFinishError(res.error || 'Could not finish this party -- please try again.');
+        setTimeout(() => setFinishError(null), 5000);
+      }
+    } finally {
+      setFinishingTableId(null);
+      onRefresh();
+    }
   };
 
   return (
@@ -53,6 +65,13 @@ export const SeatedTab: React.FC<SeatedTabProps> = ({ bookings, tables, onRefres
           </p>
         </div>
       </div>
+
+      {finishError && (
+        <div className="p-3.5 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>{finishError} The table is still shown as occupied -- nothing was lost.</span>
+        </div>
+      )}
 
       {seatedList.length === 0 ? (
         <div className="bg-white dark:bg-[#26221E] rounded-3xl p-12 text-center border border-[#E8E2D2] dark:border-[#3D352E]">
@@ -245,16 +264,18 @@ export const SeatedTab: React.FC<SeatedTabProps> = ({ bookings, tables, onRefres
                   </a>
 
                   <button
-                    disabled={!isOnline}
+                    disabled={!isOnline || finishingTableId !== null}
                     onClick={() => handleFinish(booking.tableId, `${booking.firstName} ${booking.lastName}`)}
                     className={`py-2.5 px-4 rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-1.5 active:scale-95 ${
-                      !isOnline
+                      !isOnline || finishingTableId !== null
                         ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 border border-zinc-200 dark:border-zinc-750 cursor-not-allowed shadow-none'
                         : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-emerald-600/20'
                     }`}
                   >
                     <Check className="w-4 h-4" />
-                    <span>{isOnline ? 'Finished' : 'No connection'}</span>
+                    <span>
+                      {!isOnline ? 'No connection' : finishingTableId === booking.tableId ? 'Finishing…' : 'Finished'}
+                    </span>
                   </button>
                 </div>
               </div>
