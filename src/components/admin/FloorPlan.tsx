@@ -358,11 +358,26 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       drag.dragging = true;
       suppressNextClickRef.current = true;
 
+      // Hit-test against each table's *logical* (pre-rotation) box computed
+      // straight from its x/y/width/height percentages, not
+      // tableNodeRefs[...].getBoundingClientRect(). A diamond table's
+      // rotate-45 is applied to an element whose pixel width/height aren't
+      // equal (they're percentages of the canvas's width and height, which
+      // differ on a non-square canvas), so its post-rotation axis-aligned
+      // bounding box balloons to roughly (w+h)/sqrt(2) per side — easily
+      // 2x the card's real footprint, swallowing neighboring tables and
+      // hijacking drops meant for them. The canvas-percentage math below is
+      // rotation-agnostic and matches the table's actual footprint.
+      const canvasRect = canvasRef.current.getBoundingClientRect();
       let hoverTargetId: number | null = null;
       for (const other of tables) {
         if (other.id === drag.tableId || other.isOccupied || other.isInactive) continue;
-        const rect = tableNodeRefs.current[other.id]?.getBoundingClientRect();
-        if (rect && e.clientX >= rect.left - 12 && e.clientX <= rect.right + 12 && e.clientY >= rect.top - 12 && e.clientY <= rect.bottom + 12) {
+        const coords = getTableCoords(other);
+        const left = canvasRect.left + (coords.x / 100) * canvasRect.width;
+        const top = canvasRect.top + (coords.y / 100) * canvasRect.height;
+        const right = canvasRect.left + ((coords.x + coords.width) / 100) * canvasRect.width;
+        const bottom = canvasRect.top + ((coords.y + coords.height) / 100) * canvasRect.height;
+        if (e.clientX >= left - 12 && e.clientX <= right + 12 && e.clientY >= top - 12 && e.clientY <= bottom + 12) {
           hoverTargetId = other.id;
           break;
         }

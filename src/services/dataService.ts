@@ -70,6 +70,20 @@ if (USE_EMULATOR) {
 }
 
 // ----------------------------------------------------
+// BRANCH RESOLUTION
+// ----------------------------------------------------
+// Single source of truth for "which branch is this device/session talking
+// to". Every table/booking/customer read+write and the settings doc path
+// goes through this, so wiring up a second branch later (URL param,
+// subdomain, an admin picker) is a one-function change, not a re-plumb.
+// Hardcoded to the one existing branch today -- deliberately not derived
+// from anything dynamic yet, since there is nowhere for a real selector to
+// come from until a second branch actually exists.
+export function getActiveBranchId(): string {
+  return 'millpark';
+}
+
+// ----------------------------------------------------
 // FIRESTORE ERROR HANDLING (Spec compliant)
 // ----------------------------------------------------
 enum OperationType {
@@ -314,7 +328,13 @@ if (typeof window !== 'undefined') {
 // ----------------------------------------------------
 // SEED DATA TEMPLATES
 // ----------------------------------------------------
-const DEFAULT_SETTINGS = {
+// Per-branch defaults, keyed by branch id. Each branch gets its own opening
+// hours, kalyana config, table layout/capacities, staff list, etc. Adding a
+// second real branch is a new entry in BRANCH_CONFIGS below (plus pointing
+// getActiveBranchId() at it for that deployment) -- no logic elsewhere needs
+// to change. The 'millpark' entry is today's exact values, unchanged, so
+// this is a pure refactor for the branch that's already live.
+const MILLPARK_SETTINGS = {
   whatsappNumber: '0412345678',
   kalyanaCapacity: 40,
   lunchStartTime: '11:00',
@@ -355,6 +375,10 @@ const DEFAULT_SETTINGS = {
   },
   staffList: ['Amrit', 'Sanjay', 'Vasu'],
   customerBgUrl: '',
+  // Optional promo shown in the customer-facing waiting/confirmation
+  // carousel (see WaitingCarousel.tsx). null/unset falls back to a generic
+  // "ask our staff" slide rather than showing anything broken-looking.
+  todaysSpecial: null as null | { name: string; description: string; badgeText: string },
   floorCanvasSettings: {
     aspectRatio: '16:9',
     widthMeters: 14,
@@ -370,7 +394,7 @@ const DEFAULT_SETTINGS = {
   ]
 };
 
-const INITIAL_TABLES: Table[] = [
+const MILLPARK_TABLES: Table[] = [
   { id: 1, name: 'Table 1', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5c70b0ac601a7db5ad9236', x: 76, y: 60, width: 18, height: 18, position: { column: 'right', order: 3 } },
   { id: 2, name: 'Table 2', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5c8e9ca5a01a7db5ad9236', x: 76, y: 35, width: 18, height: 18, position: { column: 'right', order: 2 } },
   { id: 3, name: 'Table 3', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5c9f04baf31a7db5ad9236', x: 76, y: 10, width: 18, height: 18, position: { column: 'right', order: 1 } },
@@ -383,9 +407,32 @@ const INITIAL_TABLES: Table[] = [
   { id: 10, name: 'Table 10', capacity: 6, maxOverrideCapacity: 6, isOccupied: false, isInactive: false, branchId: 'millpark', orderingUrl: 'https://www.justdosa.com.au/s/order?location=11f077344ecaf81ebd003cecef6d615a&customer_seat_id=11f07ef8af5cf468b6671a7db5ad9236', x: 6, y: 10, width: 18, height: 18, position: { column: 'left', order: 1 } },
 ];
 
+// The registry itself, plus the "active branch" derived constants that the
+// rest of this file already uses throughout (DEFAULT_SETTINGS/INITIAL_TABLES
+// keep their existing names/shape so no other call site needs to change).
+export const BRANCH_CONFIGS: Record<string, { settings: typeof MILLPARK_SETTINGS; initialTables: Table[] }> = {
+  millpark: {
+    settings: MILLPARK_SETTINGS,
+    initialTables: MILLPARK_TABLES,
+  },
+};
+
+const DEFAULT_SETTINGS = BRANCH_CONFIGS[getActiveBranchId()].settings;
+const INITIAL_TABLES: Table[] = BRANCH_CONFIGS[getActiveBranchId()].initialTables;
+
+// Settings doc path: 'millpark' (the one branch that already exists in
+// production) keeps reading/writing settings/global exactly as it always
+// has, so this refactor moves zero live data. Any other branch id gets its
+// own settings/{branchId} doc -- no migration needed since no other branch
+// exists yet.
+function settingsDocRef() {
+  const branchId = getActiveBranchId();
+  return doc(db, 'settings', branchId === 'millpark' ? 'global' : branchId);
+}
+
 async function migratePlaintextPins() {
   try {
-    const globalDocRef = doc(db, 'settings', 'global');
+    const globalDocRef = settingsDocRef();
     const globalSnap = await getDoc(globalDocRef);
     
     let plainStaff = '1357';
@@ -439,11 +486,11 @@ function initFirestoreSync() {
   initialized = true;
 
   // 1. Settings Document Listener
-  const settingsDocRef = doc(db, 'settings', 'global');
-  onSnapshot(settingsDocRef, async (docSnap) => {
+  const settingsDocumentRef = settingsDocRef();
+  onSnapshot(settingsDocumentRef, async (docSnap) => {
     try {
       if (!docSnap.exists()) {
-        await safeSetDoc(settingsDocRef, DEFAULT_SETTINGS);
+        await safeSetDoc(settingsDocumentRef, DEFAULT_SETTINGS);
       } else {
         const docData = sanitizeFirestoreIncoming(docSnap.data() || {});
         cachedSettings = docData;
@@ -481,7 +528,7 @@ function initFirestoreSync() {
 
         if (needsMergeUpdate) {
           console.log("Adding missing settings fields to Firestore: ", missingFields);
-          await safeSetDoc(settingsDocRef, missingFields, { merge: true });
+          await safeSetDoc(settingsDocumentRef, missingFields, { merge: true });
         }
       }
     } catch (err) {
@@ -513,16 +560,27 @@ function initFirestoreSync() {
   });
 
   // 2. Tables Collection Listener
+  // Branch-scoped client-side (not a Firestore `where()`): a query-level
+  // filter would silently exclude any legacy document missing `branchId`
+  // (impossible to fully rule out from here), whereas filtering after the
+  // read and treating a missing branchId as "belongs to the active branch"
+  // guarantees today's single-branch deployment can never lose data, while
+  // still correctly scoping once a real second branch's data exists.
+  const activeBranchIdForTables = getActiveBranchId();
   const tablesColRef = collection(db, 'tables');
   onSnapshot(tablesColRef, async (querySnap) => {
     try {
-      if (querySnap.empty) {
+      const branchDocs = querySnap.docs.filter((d) => {
+        const b = d.data()?.branchId;
+        return !b || b === activeBranchIdForTables;
+      });
+      if (branchDocs.length === 0) {
         for (const t of INITIAL_TABLES) {
           await safeSetDoc(doc(db, 'tables', t.id.toString()), t);
         }
       } else {
         const tables: Table[] = [];
-        querySnap.forEach((docSnap) => {
+        branchDocs.forEach((docSnap) => {
           const raw = docSnap.data() as any;
           const data = sanitizeFirestoreIncoming(raw) as Table;
           if (data) {
@@ -557,7 +615,9 @@ function initFirestoreSync() {
     handleFirestoreError(error, OperationType.LIST, 'tables');
   });
 
-  // 3. Bookings Collection Listener
+  // 3. Bookings Collection Listener (branch-scoped, same missing-branchId
+  // fallback rationale as the tables listener above)
+  const activeBranchIdForBookings = getActiveBranchId();
   const bookingsColRef = collection(db, 'bookings');
   onSnapshot(bookingsColRef, async (querySnap) => {
     try {
@@ -567,7 +627,10 @@ function initFirestoreSync() {
       } else {
         const bookings: Booking[] = [];
         querySnap.forEach((doc) => {
-          bookings.push(sanitizeFirestoreIncoming(doc.data() as Booking));
+          const data = sanitizeFirestoreIncoming(doc.data() as Booking);
+          if (!data.branchId || data.branchId === activeBranchIdForBookings) {
+            bookings.push(data);
+          }
         });
         cachedBookings = bookings;
         notifyListeners();
@@ -579,7 +642,8 @@ function initFirestoreSync() {
     handleFirestoreError(error, OperationType.LIST, 'bookings');
   });
 
-  // 4. Customers Collection Listener
+  // 4. Customers Collection Listener (branch-scoped, same rationale)
+  const activeBranchIdForCustomers = getActiveBranchId();
   const customersColRef = collection(db, 'customers');
   onSnapshot(customersColRef, async (querySnap) => {
     try {
@@ -589,7 +653,10 @@ function initFirestoreSync() {
       } else {
         const customers: Record<string, Customer> = {};
         querySnap.forEach((doc) => {
-          customers[doc.id] = sanitizeFirestoreIncoming(doc.data() as Customer);
+          const data = sanitizeFirestoreIncoming(doc.data() as Customer);
+          if (!data.branchId || data.branchId === activeBranchIdForCustomers) {
+            customers[doc.id] = data;
+          }
         });
         cachedCustomers = customers;
         notifyListeners();
@@ -744,7 +811,7 @@ export const dataService = {
 
   async saveAllSettings(settings: any) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), settings, { merge: true });
+      await safeSetDoc(settingsDocRef(), settings, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -756,7 +823,7 @@ export const dataService = {
 
   async setWhatsAppNumber(number: string) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { whatsappNumber: number }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { whatsappNumber: number }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -768,7 +835,7 @@ export const dataService = {
 
   async setKalyanaCapacity(capacity: number) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { kalyanaCapacity: capacity }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { kalyanaCapacity: capacity }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -780,7 +847,7 @@ export const dataService = {
 
   async setLunchStartTime(time: string) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { lunchStartTime: time }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { lunchStartTime: time }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -792,7 +859,7 @@ export const dataService = {
 
   async setLunchEndTime(time: string) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { lunchEndTime: time }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { lunchEndTime: time }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -804,7 +871,7 @@ export const dataService = {
 
   async setDinnerStartTime(time: string) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { dinnerStartTime: time }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { dinnerStartTime: time }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -816,7 +883,7 @@ export const dataService = {
 
   async setDinnerEndTime(time: string) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { dinnerEndTime: time }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { dinnerEndTime: time }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -830,7 +897,7 @@ export const dataService = {
 
   async setOpeningHours(openingHours: any) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { openingHours }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { openingHours }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -842,7 +909,7 @@ export const dataService = {
 
   async setLunchBuffer(buffer: number) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { lunchBuffer: buffer }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { lunchBuffer: buffer }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -854,7 +921,7 @@ export const dataService = {
 
   async setDinnerBuffer(buffer: number) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { dinnerBuffer: buffer }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { dinnerBuffer: buffer }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -866,7 +933,7 @@ export const dataService = {
 
   async setSlotInterval(interval: number) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { slotInterval: interval }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { slotInterval: interval }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -878,7 +945,7 @@ export const dataService = {
 
   async setKalyanaEnabled(enabled: boolean) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { kalyanaEnabled: enabled }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { kalyanaEnabled: enabled }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -892,7 +959,7 @@ export const dataService = {
 
   async setKalyanaSlots(slots: any[]) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { kalyanaSlots: slots }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { kalyanaSlots: slots }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -907,7 +974,7 @@ export const dataService = {
   async setKalyanaCutoffMinutes(mins: number) {
     try {
       const val = Math.max(0, mins);
-      await safeSetDoc(doc(db, 'settings', 'global'), { kalyanaCutoffMinutes: val }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { kalyanaCutoffMinutes: val }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -922,7 +989,7 @@ export const dataService = {
   async setKalyanaTurnMinutes(mins: number) {
     try {
       const val = Math.min(60, Math.max(15, mins));
-      await safeSetDoc(doc(db, 'settings', 'global'), { kalyanaTurnMinutes: val }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { kalyanaTurnMinutes: val }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -1071,7 +1138,7 @@ export const dataService = {
 
   async setCustomerTexts(customerTexts: any) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { customerTexts }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { customerTexts }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -1085,7 +1152,7 @@ export const dataService = {
 
   async setWaitTimeAlertThresholds(waitTimeAlertThresholds: { low: number; medium: number; high: number }) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { waitTimeAlertThresholds }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { waitTimeAlertThresholds }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -1099,7 +1166,19 @@ export const dataService = {
 
   async setCustomerBgUrl(customerBgUrl: string) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { customerBgUrl }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { customerBgUrl }, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+    }
+  },
+
+  getTodaysSpecial(): { name: string; description: string; badgeText: string } | null {
+    return (cachedSettings && cachedSettings.todaysSpecial) ? cachedSettings.todaysSpecial : null;
+  },
+
+  async setTodaysSpecial(todaysSpecial: { name: string; description: string; badgeText: string } | null) {
+    try {
+      await safeSetDoc(settingsDocRef(), { todaysSpecial }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -1116,7 +1195,7 @@ export const dataService = {
       if (cachedSettings) {
         Object.assign(cachedSettings, updates);
       }
-      await safeSetDoc(doc(db, 'settings', 'global'), updates, { merge: true });
+      await safeSetDoc(settingsDocRef(), updates, { merge: true });
       notifyListeners();
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
@@ -1145,7 +1224,7 @@ export const dataService = {
 
   async setLandmarks(landmarks: LandmarkPosition[]) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { landmarks }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { landmarks }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -1294,7 +1373,7 @@ export const dataService = {
 
   async setStaffList(staffList: string[]) {
     try {
-      await safeSetDoc(doc(db, 'settings', 'global'), { staffList }, { merge: true });
+      await safeSetDoc(settingsDocRef(), { staffList }, { merge: true });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -1491,7 +1570,7 @@ export const dataService = {
               noShowCount: 0,
               cancellationCount: 0,
               whatsappOptIn: data.whatsappOptIn,
-              branchId: 'millpark',
+              branchId: getActiveBranchId(),
               notes: data.notes || '',
               allergies: data.allergies || '',
             };
@@ -1522,7 +1601,7 @@ export const dataService = {
             bookingDate: data.bookingDate || null,
             bookingTime: data.bookingTime || null,
             isNewAlert: true,
-            branchId: 'millpark',
+            branchId: getActiveBranchId(),
             isKalyanaVirundhu: true,
             kalyanaSlot: data.kalyanaSlot,
             notes: data.notes || '',
@@ -1563,7 +1642,7 @@ export const dataService = {
             noShowCount: 0,
             cancellationCount: 0,
             whatsappOptIn: data.whatsappOptIn,
-            branchId: 'millpark',
+            branchId: getActiveBranchId(),
             notes: data.notes || '',
             allergies: data.allergies || '',
           };
@@ -1573,7 +1652,7 @@ export const dataService = {
           customer.whatsappOptIn = data.whatsappOptIn;
           if (data.notes) customer.notes = data.notes;
           if (data.allergies) customer.allergies = data.allergies;
-          if (!customer.branchId) customer.branchId = 'millpark';
+          if (!customer.branchId) customer.branchId = getActiveBranchId();
         }
         await safeSetDoc(doc(db, 'customers', cleanedPhone), customer);
 
@@ -1595,7 +1674,7 @@ export const dataService = {
           bookingDate: data.type === 'walk-in' ? null : (data.bookingDate || null),
           bookingTime: data.type === 'walk-in' ? null : (data.bookingTime || null),
           isNewAlert: true,
-          branchId: 'millpark',
+          branchId: getActiveBranchId(),
           isKalyanaVirundhu: data.isKalyanaVirundhu || null,
           kalyanaSlot: data.kalyanaSlot || null,
           notes: data.notes || '',
@@ -1692,7 +1771,7 @@ export const dataService = {
                 noShowCount: 0,
                 cancellationCount: 0,
                 whatsappOptIn: data.whatsappOptIn,
-                branchId: 'millpark',
+                branchId: getActiveBranchId(),
                 notes: data.notes || '',
                 allergies: data.allergies || '',
               };
@@ -1724,7 +1803,7 @@ export const dataService = {
             bookingDate: data.bookingDate || null,
             bookingTime: data.bookingTime || null,
             isNewAlert: false,
-            branchId: 'millpark',
+            branchId: getActiveBranchId(),
             isKalyanaVirundhu: true,
             kalyanaSlot: data.kalyanaSlot,
             source: 'phone/staff',
@@ -1762,7 +1841,7 @@ export const dataService = {
               noShowCount: 0,
               cancellationCount: 0,
               whatsappOptIn: data.whatsappOptIn,
-              branchId: 'millpark',
+              branchId: getActiveBranchId(),
               notes: data.notes || '',
               allergies: data.allergies || '',
             };
@@ -1772,7 +1851,7 @@ export const dataService = {
             customer.whatsappOptIn = data.whatsappOptIn;
             if (data.notes) customer.notes = data.notes;
             if (data.allergies) customer.allergies = data.allergies;
-            if (!customer.branchId) customer.branchId = 'millpark';
+            if (!customer.branchId) customer.branchId = getActiveBranchId();
           }
           await safeSetDoc(doc(db, 'customers', cleanedPhone), customer);
         }
@@ -1795,7 +1874,7 @@ export const dataService = {
           bookingDate: data.type === 'walk-in' ? null : (data.bookingDate || null),
           bookingTime: data.type === 'walk-in' ? null : (data.bookingTime || null),
           isNewAlert: false,
-          branchId: 'millpark',
+          branchId: getActiveBranchId(),
           isKalyanaVirundhu: null,
           kalyanaSlot: null,
           source: 'phone/staff',
@@ -2093,7 +2172,7 @@ export const dataService = {
                 noShowCount: 0,
                 cancellationCount: 0,
                 whatsappOptIn: booking.whatsappOptIn,
-                branchId: 'millpark',
+                branchId: getActiveBranchId(),
               });
             }
           }
@@ -2306,7 +2385,7 @@ export const dataService = {
         createdAt: new Date().toISOString(),
         seatedAt: new Date().toISOString(),
         tableId,
-        branchId: 'millpark',
+        branchId: getActiveBranchId(),
         bookingDate: null,
         bookingTime: null,
         ...(handledByVal ? { handledBy: handledByVal } : {})

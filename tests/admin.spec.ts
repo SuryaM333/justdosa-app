@@ -141,6 +141,11 @@ test.describe('Admin / staff flow', () => {
   });
 
   test('manual/phone staff booking is confirmed instantly, without pending review', async ({ page, seed }) => {
+    // The modal's default booking date is "today" from the real clock, and
+    // Create Booking is disabled outright for non-waitlist bookings on a
+    // Tuesday (the restaurant is closed) -- freeze to a Wednesday so this
+    // test's outcome doesn't depend on which real calendar day it runs on.
+    await page.clock.setFixedTime(new Date('2026-08-05T10:00:00'));
     await seedDefaultTables(seed);
     await loginAsOwner(page);
 

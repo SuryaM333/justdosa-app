@@ -249,6 +249,15 @@ export async function dragTableOnto(page: Page, fromName: string, toName: string
   await page.mouse.down();
   await page.mouse.move(startX + 20, startY + 10, { steps: 5 }); // cross the 8px drag threshold
   await page.mouse.move(endX, endY, { steps: 10 });
+  // A final zero-distance move plus a short dwell gives React's pointermove
+  // handler (which recomputes the hover target on every event) a moment to
+  // process the true final position and re-render the hover-highlight state
+  // before release, rather than racing ahead of it -- observed to matter
+  // specifically under heavier system load (e.g. deep into a long full-suite
+  // run), where an intermediate/final move event can otherwise be coalesced
+  // or its resulting state update not yet flushed by the time mouse.up fires.
+  await page.mouse.move(endX, endY);
+  await page.waitForTimeout(400);
   await page.mouse.up();
 }
 

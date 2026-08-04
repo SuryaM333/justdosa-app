@@ -8,7 +8,7 @@ import { formatAusMobile, isValidAusMobile, cleanPhoneNumber, getWhatsAppUrl } f
 import { formatPartyBreakdown } from '../../utils/bookingUtils';
 import { safeFormatValidUntil } from '../../utils/dateUtils';
 import { resolveGroupMembers, getGroupCombinedName, getGroupCombinedShortCode, getGroupCombinedOrderingUrl } from '../../utils/mergeUtils';
-import { SignatureDishShowcase } from './SignatureDishShowcase';
+import { WaitingCarousel } from './WaitingCarousel';
 import { LOGO_BASE64 } from '../logoBase64';
 import { TimeWheelPicker, getAvailableTimeSlotsShared } from '../TimeWheelPicker';
 import { QuickNotesSelector } from '../QuickNotesSelector';
@@ -218,17 +218,28 @@ export const CustomerView: React.FC = () => {
         if (docSnap.exists()) {
           const found = sanitizeFirestoreIncoming(docSnap.data() as Booking);
           setActiveBooking(found);
+          const isLiveQueueStatus = found.status === 'waiting' || found.status === 'seated' || found.status === 'finished';
           if (!hasRoutedOnLoad) {
-            if (found.type === 'walk-in' && (found.status === 'waiting' || found.status === 'seated' || found.status === 'finished')) {
+            if (found.type === 'walk-in' && isLiveQueueStatus) {
               setActiveTab('status');
             } else if (found.type === 'remote' && ['booked', 'pending', 'confirmed', 'declined', 'alternative_proposed', 'cancelled'].includes(found.status)) {
               setActiveTab('confirmation');
             }
             setHasRoutedOnLoad(true);
+          } else if (isLiveQueueStatus && activeTab !== 'status') {
+            // A remote booking's `type` never changes to 'walk-in', so once
+            // staff mark the guest "Arrived" (status -> waiting) it wouldn't
+            // otherwise re-route off the confirmation screen it loaded on
+            // (that routing above only runs once). Any booking that enters
+            // the live waiting/seated/finished flow belongs on the 'status'
+            // screen regardless of its original type.
+            setActiveTab('status');
           }
-          
-          // Always keep queueInfo up to date
-          if (found.type === 'walk-in') {
+
+          // Always keep queueInfo up to date. Keyed off status, not type:
+          // getWaitingQueuePosition itself is type-agnostic, and a former
+          // remote booking can enter the waiting queue too (see above).
+          if (found.status === 'waiting') {
             const qInfo = dataService.getWaitingQueuePosition(found.id);
             setQueueInfo(qInfo);
           }
@@ -318,6 +329,18 @@ export const CustomerView: React.FC = () => {
       const capacity = slotConfig ? slotConfig.capacity : dataService.getKalyanaCapacity();
       if (guestsInSlot + totalGuests > capacity) {
         setErrorMsg(`Selected Kalyana Virundhu slot is fully booked. Only ${capacity - guestsInSlot} seats left.`);
+        return;
+      }
+    } else if (activeTab === 'remote') {
+      // The picker only ever offers valid future/in-hours times, but
+      // `bookingTime` is state that can go stale relative to `bookingDate`
+      // (e.g. the clock crosses closing time while the tab sits open, or the
+      // date changes faster than the auto-correct effect runs) — the submit
+      // button itself is only disabled for fully-closed days, so re-check
+      // the actual slot list here rather than trusting stale state.
+      const slots = getAvailableTimeSlots(bookingDate);
+      if (slots.length === 0 || !slots.some((s) => s.value === bookingTime)) {
+        setErrorMsg('That time is no longer available — please pick another time.');
         return;
       }
     }
@@ -601,7 +624,7 @@ export const CustomerView: React.FC = () => {
               </div>
 
               {/* Premium Signature Dish Showcase slider */}
-              <SignatureDishShowcase />
+              <WaitingCarousel />
 
               <div className="bg-[#1C1917] rounded-xl p-3 text-left text-xs text-[#B8ACA0] mb-6 border border-[#3D352E]">
                 <div className="flex items-center gap-2 mb-1 text-white font-semibold">
@@ -869,6 +892,9 @@ export const CustomerView: React.FC = () => {
                   Save this so you can check your booking anytime.
                 </span>
               </div>
+
+              {/* Something to look at while you wait on your reservation date */}
+              {!isCancelled && !isDeclined && <WaitingCarousel />}
 
               {/* Action Buttons */}
               <div className="space-y-3 mb-6">

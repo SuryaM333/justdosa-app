@@ -59,6 +59,10 @@ service cloud.firestore {
     }
 
     // ---- tables ----
+    // branchId is checked loosely (absent OR a string) rather than required:
+    // the app treats a missing branchId as "belongs to the active branch"
+    // (see dataService.ts's collection listeners) for backward compatibility
+    // with any pre-multi-branch data, so rules must not reject that shape.
     match /tables/{tableId} {
       allow read: if true;
       allow write: if isMap(request.resource.data)
@@ -66,7 +70,8 @@ service cloud.firestore {
         && request.resource.data.name is string
         && request.resource.data.capacity is number
         && request.resource.data.isOccupied is bool
-        && request.resource.data.isInactive is bool;
+        && request.resource.data.isInactive is bool
+        && (!('branchId' in request.resource.data) || request.resource.data.branchId is string);
       allow delete: if true;
     }
 
@@ -79,7 +84,8 @@ service cloud.firestore {
         && request.resource.data.phone is string
         && request.resource.data.partySize is number
         && request.resource.data.status is string
-        && request.resource.data.type is string;
+        && request.resource.data.type is string
+        && (!('branchId' in request.resource.data) || request.resource.data.branchId is string);
       allow delete: if true;
     }
 
@@ -92,7 +98,8 @@ service cloud.firestore {
       allow write: if isMap(request.resource.data)
         && request.resource.data.phone is string
         && request.resource.data.firstName is string
-        && request.resource.data.totalVisits is number;
+        && request.resource.data.totalVisits is number
+        && (!('branchId' in request.resource.data) || request.resource.data.branchId is string);
       allow delete: if true;
     }
 

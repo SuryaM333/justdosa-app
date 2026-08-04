@@ -50,6 +50,10 @@ export const SettingsTab: React.FC = () => {
   const [kalyanaTurnMinutes, setKalyanaTurnMinutes] = useState(() => dataService.getKalyanaTurnMinutes().toString());
   const [kalyanaSlots, setKalyanaSlots] = useState(() => dataService.getKalyanaSlots().map(s => ({ ...s })));
   const [customerTexts, setCustomerTexts] = useState(() => ({ ...dataService.getCustomerTexts() }));
+  const [todaysSpecial, setTodaysSpecial] = useState(() => {
+    const existing = dataService.getTodaysSpecial();
+    return existing ? { ...existing } : { name: '', description: '', badgeText: '' };
+  });
   const [waitTimeAlertThresholds, setWaitTimeAlertThresholds] = useState(() => ({ ...dataService.getWaitTimeAlertThresholds() }));
   const [openingHours, setOpeningHours] = useState(() => JSON.parse(JSON.stringify(dataService.getOpeningHours())));
   const [tables, setTables] = useState<Table[]>([]);
@@ -295,6 +299,7 @@ export const SettingsTab: React.FC = () => {
       await dataService.setCustomerBgUrl(customerBgUrl);
       await dataService.setLandmarks(landmarks);
       await dataService.setStaffList(staffList);
+      await dataService.setTodaysSpecial(todaysSpecial.name.trim() ? todaysSpecial : null);
 
       // If a new Staff PIN was typed (and verified in validateAll), save its
       // hash and clear all three fields.
@@ -1149,6 +1154,37 @@ export const SettingsTab: React.FC = () => {
                     />
                     <span className="text-[10px] text-[#6B5E4C]/80 dark:text-[#B8ACA0]/80 block">
                       Shown to customers once they are checked out and marked finished.
+                    </span>
+                  </div>
+
+                  {/* Today's Special promo (shown in the waiting/confirmation carousel) */}
+                  <div className="space-y-1.5 pt-2 border-t border-dashed border-[#E8E2D2] dark:border-[#3D352E]">
+                    <label className="block text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0] uppercase">
+                      Today's Special (shown in the customer waiting/confirmation carousel)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Ghee Roast Dosa"
+                      value={todaysSpecial.name}
+                      onChange={(e) => setTodaysSpecial({ ...todaysSpecial, name: e.target.value })}
+                      className="w-full p-3 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-[#FDFBF7] dark:bg-[#1C1917] text-sm text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
+                    />
+                    <textarea
+                      rows={2}
+                      placeholder="Short description customers will see"
+                      value={todaysSpecial.description}
+                      onChange={(e) => setTodaysSpecial({ ...todaysSpecial, description: e.target.value })}
+                      className="w-full p-3 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-[#FDFBF7] dark:bg-[#1C1917] text-sm text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Badge text, e.g. Weekend Only"
+                      value={todaysSpecial.badgeText}
+                      onChange={(e) => setTodaysSpecial({ ...todaysSpecial, badgeText: e.target.value })}
+                      className="w-full p-3 rounded-xl border border-[#E8E2D2] dark:border-[#3D352E] bg-[#FDFBF7] dark:bg-[#1C1917] text-sm text-[#2D2926] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E37A08]"
+                    />
+                    <span className="text-[10px] text-[#6B5E4C]/80 dark:text-[#B8ACA0]/80 block">
+                      Leave the name blank to fall back to a generic "ask our staff" slide.
                     </span>
                   </div>
 
