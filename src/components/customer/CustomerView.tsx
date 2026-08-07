@@ -6,7 +6,7 @@ import { dataService, db, sanitizeFirestoreIncoming } from '../../services/dataS
 import { doc, onSnapshot } from 'firebase/firestore';
 import { formatAusMobile, isValidAusMobile, cleanPhoneNumber, getWhatsAppUrl } from '../../utils/phone';
 import { formatPartyBreakdown } from '../../utils/bookingUtils';
-import { safeFormatValidUntil } from '../../utils/dateUtils';
+import { safeFormatValidUntil, getMaxAdvanceBookingDateStr } from '../../utils/dateUtils';
 import { resolveGroupMembers, getGroupCombinedName, getGroupCombinedShortCode, getGroupCombinedOrderingUrl } from '../../utils/mergeUtils';
 import { LOGO_BASE64 } from '../logoBase64';
 import { TimeWheelPicker, getAvailableTimeSlotsShared } from '../TimeWheelPicker';
@@ -16,6 +16,10 @@ import { QuickNotesSelector } from '../QuickNotesSelector';
 // after a customer joins the queue or submits a reservation -- keeps its
 // dish images/animation code out of the initial customer-facing bundle.
 const WaitingCarousel = lazy(() => import('./WaitingCarousel').then((m) => ({ default: m.WaitingCarousel })));
+
+// Regular (non-Kalyana) table reservations can only be made this many days ahead;
+// further out, customers are pointed to call/WhatsApp staff directly instead.
+const MAX_ADVANCE_BOOKING_DAYS = 3;
 
 export const CustomerView: React.FC = () => {
   const [showIntro, setShowIntro] = useState(() => {
@@ -1393,6 +1397,7 @@ export const CustomerView: React.FC = () => {
                       type="date"
                       required
                       min={new Date().toISOString().split('T')[0]}
+                      max={getMaxAdvanceBookingDateStr(MAX_ADVANCE_BOOKING_DAYS)}
                       value={bookingDate}
                       onChange={(e) => setBookingDate(e.target.value)}
                       onKeyDown={(e) => e.preventDefault()}
@@ -1441,6 +1446,29 @@ export const CustomerView: React.FC = () => {
                     )}
                   </div>
                 </div>
+
+                <p className="text-[11px] text-[#6B5E4C] dark:text-[#B8ACA0] -mt-1.5">
+                  Online booking is available up to {MAX_ADVANCE_BOOKING_DAYS} days ahead. Need a date further out?{' '}
+                  <a
+                    href={`tel:${cleanPhoneNumber(dataService.getWhatsAppNumber())}`}
+                    className="font-bold text-[#8B4513] dark:text-[#E37A08] underline hover:opacity-80"
+                  >
+                    Call us
+                  </a>
+                  {' '}or{' '}
+                  <a
+                    href={getWhatsAppUrl(
+                      dataService.getWhatsAppNumber(),
+                      'Hi Just Dosa team, I would like to book a table for a date beyond the next 3 days.'
+                    )}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-bold text-[#22C55E] dark:text-[#22C55E] underline hover:opacity-80"
+                  >
+                    WhatsApp us
+                  </a>
+                  .
+                </p>
 
                 {/* Saturday Menu Selection Question */}
                 {getDayOfWeek(bookingDate) === 6 && dataService.isKalyanaEnabled() && (

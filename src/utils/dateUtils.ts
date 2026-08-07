@@ -148,3 +148,13 @@ export function getLocalTimeMins(dateObj: Date = new Date()): number {
   return dateObj.getHours() * 60 + dateObj.getMinutes();
 }
 
+/**
+ * Returns the YYYY-MM-DD date string `daysAhead` days from `fromDate` (local time),
+ * for capping how far in advance an online booking can be made.
+ */
+export function getMaxAdvanceBookingDateStr(daysAhead: number, fromDate: Date = new Date()): string {
+  const d = new Date(fromDate);
+  d.setDate(d.getDate() + daysAhead);
+  return getLocalDateStr(d);
+}
+

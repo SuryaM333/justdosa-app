@@ -1,11 +1,11 @@
-import { test, expect, loginAsOwner, loginAsStaff, makeBooking, seedDefaultTables, dragTableOnto } from './fixtures';
+import { test, expect, loginAsOwner, loginAsStaff, makeBooking, seedDefaultTables, mergeTables, dragTableToPosition } from './fixtures';
 
-test.describe('Drag-to-merge tables', () => {
-  test('dragging one vacant table onto an adjacent vacant table merges them into one unit', async ({ page, seed }) => {
+test.describe('Select-based table merge', () => {
+  test('selecting one other vacant table and confirming merges them into one unit', async ({ page, seed }) => {
     await seedDefaultTables(seed);
     await loginAsOwner(page);
 
-    await dragTableOnto(page, 'Table 1', 'Table 2');
+    await mergeTables(page, 'Table 1', 'Table 2');
 
     await expect(page.getByText('Table 1+2', { exact: true })).toBeVisible({ timeout: 5000 });
     // Combined capacity: two 6-seaters = 12p.
@@ -22,13 +22,51 @@ test.describe('Drag-to-merge tables', () => {
     expect(t2?.mergeGroupTableIds?.sort()).toEqual([1, 2]);
   });
 
+  test('deselecting a candidate before confirming excludes it from the merge', async ({ page, seed }) => {
+    await seedDefaultTables(seed);
+    await loginAsOwner(page);
+
+    await page.getByRole('button', { name: 'Merge Table 1', exact: true }).click();
+    await page.getByRole('checkbox', { name: 'Table 2', exact: true }).click();
+    await page.getByRole('checkbox', { name: 'Table 3', exact: true }).click();
+    // Deselect Table 2 by toggling it again — only Table 3 should end up merged.
+    await page.getByRole('checkbox', { name: 'Table 2', exact: true }).click();
+    await page.getByRole('button', { name: /^confirm merge$/i }).click();
+
+    await expect(page.getByText('Table 1+3', { exact: true })).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText('Table 2', { exact: true })).toBeVisible();
+
+    const t1 = await seed.getTable(1);
+    const t2 = await seed.getTable(2);
+    const t3 = await seed.getTable(3);
+    expect(t1?.mergeGroupTableIds?.sort()).toEqual([1, 3]);
+    expect(t2?.mergeGroupId).toBeFalsy();
+    expect(t3?.mergeGroupTableIds?.sort()).toEqual([1, 3]);
+  });
+
+  test('cancelling the merge picker leaves all tables unmerged', async ({ page, seed }) => {
+    await seedDefaultTables(seed);
+    await loginAsOwner(page);
+
+    await page.getByRole('button', { name: 'Merge Table 1', exact: true }).click();
+    await page.getByRole('checkbox', { name: 'Table 2', exact: true }).click();
+    await page.getByRole('button', { name: /^cancel$/i }).click();
+
+    await expect(page.getByText('Table 1', { exact: true })).toBeVisible();
+    await expect(page.getByText('Table 2', { exact: true })).toBeVisible();
+    await expect(page.getByText('Table 1+2', { exact: true })).toHaveCount(0);
+
+    const t1 = await seed.getTable(1);
+    expect(t1?.mergeGroupId).toBeFalsy();
+  });
+
   test('a merged unit is allocatable as one entity to a single party', async ({ page, seed }) => {
     await seedDefaultTables(seed);
     const booking = makeBooking({ firstName: 'BigParty', status: 'waiting', partySize: 10 });
     await seed.setBooking(booking);
 
     await loginAsOwner(page);
-    await dragTableOnto(page, 'Table 1', 'Table 2');
+    await mergeTables(page, 'Table 1', 'Table 2');
     await expect(page.getByText('Table 1+2', { exact: true })).toBeVisible({ timeout: 5000 });
 
     await page.getByRole('button', { name: /select to seat/i }).click();
@@ -47,14 +85,16 @@ test.describe('Drag-to-merge tables', () => {
     expect(finalBooking?.tableId).toBe(1); // primary = lowest id
   });
 
-  test('a third table can be dragged onto an existing merged pair to form a trio', async ({ page, seed }) => {
+  test('a third table can be merged into an existing merged pair to form a trio', async ({ page, seed }) => {
     await seedDefaultTables(seed);
     await loginAsOwner(page);
 
-    await dragTableOnto(page, 'Table 1', 'Table 2');
+    await mergeTables(page, 'Table 1', 'Table 2');
     await expect(page.getByText('Table 1+2', { exact: true })).toBeVisible({ timeout: 5000 });
 
-    await dragTableOnto(page, 'Table 3', 'Table 1+2');
+    // Table 3 is still unmerged, so it carries the Merge trigger — fold the
+    // existing pair in by selecting it as a candidate from Table 3's picker.
+    await mergeTables(page, 'Table 3', 'Table 1+2');
     await expect(page.getByText('Table 1+2+3', { exact: true })).toBeVisible({ timeout: 5000 });
     await expect(page.getByText('18p', { exact: true })).toBeVisible();
 
@@ -62,18 +102,23 @@ test.describe('Drag-to-merge tables', () => {
     expect(t3?.mergeGroupTableIds?.sort()).toEqual([1, 2, 3]);
   });
 
-  test('a 4th table cannot be merged into an existing trio', async ({ page, seed }) => {
+  test('any number of tables can be merged together — there is no artificial cap', async ({ page, seed }) => {
     await seedDefaultTables(seed);
     await loginAsOwner(page);
 
-    await dragTableOnto(page, 'Table 1', 'Table 2');
+    await mergeTables(page, 'Table 1', 'Table 2');
     await expect(page.getByText('Table 1+2', { exact: true })).toBeVisible({ timeout: 5000 });
-    await dragTableOnto(page, 'Table 3', 'Table 1+2');
+    await mergeTables(page, 'Table 3', 'Table 1+2');
     await expect(page.getByText('Table 1+2+3', { exact: true })).toBeVisible({ timeout: 5000 });
+    await mergeTables(page, 'Table 4', 'Table 1+2+3');
 
-    await dragTableOnto(page, 'Table 4', 'Table 1+2+3');
-    await expect(page.getByText(/maximum 3 tables can be merged/i)).toBeVisible({ timeout: 5000 });
-    await expect(page.getByText('Table 4', { exact: true })).toBeVisible();
+    await expect(page.getByText('Table 1+2+3+4', { exact: true })).toBeVisible({ timeout: 5000 });
+    // Four 6-seaters = 24p, and it went through without any "maximum tables" error.
+    await expect(page.getByText('24p', { exact: true })).toBeVisible();
+    await expect(page.getByText(/maximum.*tables.*merged/i)).toHaveCount(0);
+
+    const t4 = await seed.getTable(4);
+    expect(t4?.mergeGroupTableIds?.sort()).toEqual([1, 2, 3, 4]);
   });
 
   test('finishing a merged party separates the tables back to their own individual states', async ({ page, seed }) => {
@@ -82,7 +127,7 @@ test.describe('Drag-to-merge tables', () => {
     await seed.setBooking(booking);
 
     await loginAsOwner(page);
-    await dragTableOnto(page, 'Table 1', 'Table 2');
+    await mergeTables(page, 'Table 1', 'Table 2');
     await expect(page.getByText('Table 1+2', { exact: true })).toBeVisible({ timeout: 5000 });
     await page.getByRole('button', { name: /select to seat/i }).click();
     await page.getByText('Table 1+2', { exact: true }).click();
@@ -108,7 +153,7 @@ test.describe('Drag-to-merge tables', () => {
     await seedDefaultTables(seed);
     await loginAsOwner(page);
 
-    await dragTableOnto(page, 'Table 1', 'Table 2');
+    await mergeTables(page, 'Table 1', 'Table 2');
     await expect(page.getByText('Table 1+2', { exact: true })).toBeVisible({ timeout: 5000 });
 
     await page.getByRole('button', { name: /unmerge/i }).click();
@@ -126,7 +171,7 @@ test.describe('Drag-to-merge tables', () => {
     await seed.setBooking(booking);
 
     await loginAsOwner(page);
-    await dragTableOnto(page, 'Table 5', 'Table 6');
+    await mergeTables(page, 'Table 5', 'Table 6');
     await expect(page.getByText('Table 5+6', { exact: true })).toBeVisible({ timeout: 5000 });
 
     await page.getByRole('button', { name: /select to seat/i }).click();
@@ -147,7 +192,7 @@ test.describe('Drag-to-merge tables', () => {
     await loginAsOwner(page);
 
     await page.getByRole('button', { name: /edit floor plan/i }).click();
-    await dragTableOnto(page, 'Table 1', 'Table 2');
+    await dragTableToPosition(page, 'Table 1', 'Table 2');
 
     // Still in edit mode, still two separate tables — repositioning, not merging.
     await expect(page.getByText(/done editing/i)).toBeVisible();
@@ -159,11 +204,19 @@ test.describe('Drag-to-merge tables', () => {
     expect(t1?.mergeGroupId).toBeFalsy();
   });
 
-  test('floor-plan drag-to-merge is available to staff, not just managers', async ({ page, seed }) => {
+  test('the Merge trigger is not offered while in edit mode', async ({ page, seed }) => {
+    await seedDefaultTables(seed);
+    await loginAsOwner(page);
+
+    await page.getByRole('button', { name: /edit floor plan/i }).click();
+    await expect(page.getByRole('button', { name: 'Merge Table 1', exact: true })).toHaveCount(0);
+  });
+
+  test('table merging is available to staff, not just managers', async ({ page, seed }) => {
     await seedDefaultTables(seed);
     await loginAsStaff(page);
 
-    await dragTableOnto(page, 'Table 1', 'Table 2');
+    await mergeTables(page, 'Table 1', 'Table 2');
     await expect(page.getByText('Table 1+2', { exact: true })).toBeVisible({ timeout: 5000 });
     // But Edit Floor Plan itself remains manager-only.
     await expect(page.getByRole('button', { name: /edit floor plan/i })).toHaveCount(0);

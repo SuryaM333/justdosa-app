@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
-  Users, CheckCircle2, AlertTriangle, Ban, Clock, X, Check, Plus, UserCheck, 
-  DoorOpen, Bath, UtensilsCrossed, Store, Baby, GitMerge, GripVertical, Move, 
+  Users, CheckCircle2, AlertTriangle, Ban, Clock, X, Check, Plus, UserCheck,
+  DoorOpen, Bath, UtensilsCrossed, Store, Baby, GitMerge,
   Edit2, Save, Grid, Maximize2, Trash2, RotateCw, Wine, CreditCard, Armchair,
   CheckCircle, Sliders, LayoutGrid
 } from 'lucide-react';
@@ -19,7 +19,6 @@ import {
   getGroupCombinedShortCode,
   getGroupCombinedOrderingUrl,
   isTableMerged,
-  canMerge,
 } from '../../utils/mergeUtils';
 
 interface FloorPlanProps {
@@ -53,16 +52,11 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const [quickSeatPhone, setQuickSeatPhone] = useState('');
   const [quickSeatServer, setQuickSeatServer] = useState('');
 
-  // Drag-to-merge state: which table is currently being dragged, its live
-  // pointer offset (px), and which other table it's currently hovering over
-  // (the merge candidate, highlighted while hovering).
-  const [mergeDrag, setMergeDrag] = useState<{ tableId: number; dx: number; dy: number; hoverTargetId: number | null } | null>(null);
-  const tableNodeRefs = useRef<Record<number, HTMLDivElement | null>>({});
-  const activeMergeDragRef = useRef<{ tableId: number; startClientX: number; startClientY: number; dragging: boolean } | null>(null);
-  // Set true the instant a merge-drag crosses the movement threshold, so the
-  // native click that follows pointerup on the same element is swallowed
-  // instead of being treated as a tap-to-quick-seat/allocate.
-  const suppressNextClickRef = useRef(false);
+  // Select-based merge: tap the "Merge" button on a vacant table to pick it
+  // as the anchor, then check off any number of other vacant tables to fold
+  // in via the modal below (tables/{id} candidates can be toggled on/off
+  // before confirming).
+  const [mergeModal, setMergeModal] = useState<{ anchorId: number; selectedIds: number[] } | null>(null);
 
   // Edit Mode & Canvas State
   const [isEditMode, setIsEditMode] = useState(false);
@@ -211,16 +205,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   const bestFitTable = getBestFitTable();
 
   // Handle table seating/allocation click in operational view (merging is
-  // now a drag gesture, handled separately by handleTableMergeDragStart /
-  // handlePointerMoveCanvas / handlePointerUpCanvas below).
+  // triggered separately, via the per-table Merge button + mergeModal below).
   const handleTableClick = async (table: Table) => {
     if (isEditMode) return;
-    if (suppressNextClickRef.current) {
-      // A real merge-drag just ended on this element — the trailing native
-      // click is not a tap, swallow it.
-      suppressNextClickRef.current = false;
-      return;
-    }
     setErrorToast(null);
 
     if (table.isOccupied) {
@@ -260,18 +247,48 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
     }
   };
 
-  // Starts a candidate merge-drag on pointerdown; whether it becomes a real
-  // drag (vs. a stationary tap) is decided in handlePointerMoveCanvas once
-  // the pointer crosses the movement threshold.
-  const handleTableMergeDragStart = (e: React.PointerEvent, table: Table) => {
-    if (isEditMode || table.isOccupied || table.isInactive || selectedWaitingBooking) return;
-    activeMergeDragRef.current = {
-      tableId: table.id,
-      startClientX: e.clientX,
-      startClientY: e.clientY,
-      dragging: false,
-    };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  // Opens the merge picker with `table` pre-selected as the anchor ("main
+  // table"). Only vacant, active, unmerged tables can start a merge.
+  const openMergeModal = (table: Table) => {
+    if (isEditMode || table.isOccupied || table.isInactive || isTableMerged(table) || selectedWaitingBooking) return;
+    setMergeModal({ anchorId: table.id, selectedIds: [] });
+  };
+
+  // Toggles a candidate table in/out of the pending merge selection — this
+  // is the "deselect" affordance: tapping a checked candidate again removes it.
+  const toggleMergeCandidate = (tableId: number) => {
+    setMergeModal((prev) => {
+      if (!prev) return prev;
+      const isSelected = prev.selectedIds.includes(tableId);
+      return {
+        ...prev,
+        selectedIds: isSelected
+          ? prev.selectedIds.filter((id) => id !== tableId)
+          : [...prev.selectedIds, tableId],
+      };
+    });
+  };
+
+  const handleConfirmMerge = async () => {
+    if (!mergeModal) return;
+    const anchor = tables.find((t) => t.id === mergeModal.anchorId);
+    if (!anchor) {
+      setMergeModal(null);
+      return;
+    }
+    const allIds = new Set(resolveGroupMembers(anchor, tables).map((t) => t.id));
+    for (const id of mergeModal.selectedIds) {
+      const candidate = tables.find((t) => t.id === id);
+      if (!candidate) continue;
+      resolveGroupMembers(candidate, tables).forEach((t) => allIds.add(t.id));
+    }
+    setMergeModal(null);
+    const res = await dataService.mergeTables(Array.from(allIds));
+    if (res.success) {
+      onTableUpdated();
+    } else {
+      setErrorToast(res.error || 'Merge failed.');
+    }
   };
 
   const handleQuickSeatSubmit = async (e: React.FormEvent) => {
@@ -344,47 +361,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
   };
 
   const handlePointerMoveCanvas = (e: React.PointerEvent) => {
-    if (!canvasRef.current) return;
-
-    // Merge-drag lives entirely outside edit mode, and uses live client-pixel
-    // hit-testing against other tables' rects rather than the canvas's own
-    // percentage math (which the edit-mode drag/resize below relies on).
-    if (!isEditMode) {
-      const drag = activeMergeDragRef.current;
-      if (!drag) return;
-      const dx = e.clientX - drag.startClientX;
-      const dy = e.clientY - drag.startClientY;
-      if (!drag.dragging && Math.hypot(dx, dy) < 8) return;
-      drag.dragging = true;
-      suppressNextClickRef.current = true;
-
-      // Hit-test against each table's *logical* (pre-rotation) box computed
-      // straight from its x/y/width/height percentages, not
-      // tableNodeRefs[...].getBoundingClientRect(). A diamond table's
-      // rotate-45 is applied to an element whose pixel width/height aren't
-      // equal (they're percentages of the canvas's width and height, which
-      // differ on a non-square canvas), so its post-rotation axis-aligned
-      // bounding box balloons to roughly (w+h)/sqrt(2) per side — easily
-      // 2x the card's real footprint, swallowing neighboring tables and
-      // hijacking drops meant for them. The canvas-percentage math below is
-      // rotation-agnostic and matches the table's actual footprint.
-      const canvasRect = canvasRef.current.getBoundingClientRect();
-      let hoverTargetId: number | null = null;
-      for (const other of tables) {
-        if (other.id === drag.tableId || other.isOccupied || other.isInactive) continue;
-        const coords = getTableCoords(other);
-        const left = canvasRect.left + (coords.x / 100) * canvasRect.width;
-        const top = canvasRect.top + (coords.y / 100) * canvasRect.height;
-        const right = canvasRect.left + ((coords.x + coords.width) / 100) * canvasRect.width;
-        const bottom = canvasRect.top + ((coords.y + coords.height) / 100) * canvasRect.height;
-        if (e.clientX >= left - 12 && e.clientX <= right + 12 && e.clientY >= top - 12 && e.clientY <= bottom + 12) {
-          hoverTargetId = other.id;
-          break;
-        }
-      }
-      setMergeDrag({ tableId: drag.tableId, dx, dy, hoverTargetId });
-      return;
-    }
+    if (!canvasRef.current || !isEditMode) return;
 
     const canvasRect = canvasRef.current.getBoundingClientRect();
     if (!canvasRect.width || !canvasRect.height) return;
@@ -478,36 +455,6 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
       activeResizeRef.current = null;
       setLayoutToast('Floor plan layout saved ✓');
       setTimeout(() => setLayoutToast(null), 2000);
-      return;
-    }
-
-    if (activeMergeDragRef.current) {
-      const { tableId: draggedId } = activeMergeDragRef.current;
-      const hoverTargetId = mergeDrag?.hoverTargetId ?? null;
-      activeMergeDragRef.current = null;
-      setMergeDrag(null);
-
-      if (hoverTargetId !== null) {
-        const draggedTable = tables.find((t) => t.id === draggedId);
-        const targetTable = tables.find((t) => t.id === hoverTargetId);
-        if (draggedTable && targetTable) {
-          const check = canMerge(draggedTable, targetTable, tables);
-          if (!check.ok) {
-            setErrorToast(check.reason || 'Cannot merge these tables.');
-          } else {
-            const groupA = resolveGroupMembers(draggedTable, tables);
-            const groupB = resolveGroupMembers(targetTable, tables);
-            const allIds = Array.from(new Set([...groupA.map((t) => t.id), ...groupB.map((t) => t.id)]));
-            dataService.mergeTables(allIds).then((res) => {
-              if (res.success) {
-                onTableUpdated();
-              } else {
-                setErrorToast(res.error || 'Merge failed.');
-              }
-            });
-          }
-        }
-      }
     }
   };
 
@@ -591,7 +538,7 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 Selecting table for <strong>{selectedWaitingBooking.firstName}</strong> (Party of {selectedWaitingBooking.partySize}). Tap a vacant table!
               </span>
             ) : (
-              'Tap a vacant table to allocate or quick-seat, drag one vacant table onto another to merge them, or tap an occupied table to finish or view notes.'
+              'Tap a vacant table to allocate or quick-seat, use the Merge button on a table to combine it with others, or tap an occupied table to finish or view notes.'
             )}
           </p>
         </div>
@@ -853,10 +800,9 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
             const booking = getTableBooking(table);
             const isBestFit = bestFitTable?.id === table.id;
             const isSelectedNode = selectedNode?.kind === 'table' && selectedNode.id === table.id;
-            const isBeingDragged = mergeDrag?.tableId === table.id;
-            const isDropHoverTarget = mergeDrag?.hoverTargetId === table.id;
             const combinedCapacity = getGroupCombinedCapacity(group);
             const combinedName = getGroupCombinedName(group);
+            const canStartMerge = !isEditMode && !merged && !table.isOccupied && !table.isInactive && !selectedWaitingBooking;
 
             let statusBg = 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-500 text-emerald-950 dark:text-emerald-100';
             let badgeColor = 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300';
@@ -873,27 +819,20 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
               statusBg = 'bg-amber-100 dark:bg-amber-950/60 border-amber-400 text-amber-950 dark:text-amber-100 ring-4 ring-amber-400/50 animate-pulse';
             }
 
-            if (isDropHoverTarget) {
-              statusBg = 'bg-blue-100 dark:bg-blue-950/80 border-blue-500 ring-4 ring-blue-500/50';
-            }
-
             const isDiamond = !merged && coords.shape === 'diamond';
 
             return (
               <motion.div
                 key={`tbl-${table.id}`}
-                layout={!isBeingDragged}
+                layout
                 layoutId={`table-${table.id}`}
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.9 }}
                 transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-                ref={(el: HTMLDivElement | null) => { tableNodeRefs.current[table.id] = el; }}
                 onPointerDown={(e) => {
                   if (isEditMode) {
                     handlePointerDownDrag(e, 'table', table.id, coords.x, coords.y, coords.width, coords.height);
-                  } else {
-                    handleTableMergeDragStart(e, table);
                   }
                 }}
                 onClick={() => {
@@ -901,15 +840,29 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                 }}
                 className={`absolute rounded-2xl border-2 flex flex-col items-center justify-between p-2 shadow-md select-none ${statusBg} ${
                   isEditMode ? 'cursor-grab active:cursor-grabbing hover:border-[#E37A08]' : 'cursor-pointer'
-                } ${isDiamond ? 'rotate-45' : ''} ${isSelectedNode ? 'ring-4 ring-[#E37A08] border-[#E37A08] z-20' : isBeingDragged ? 'z-40 shadow-2xl' : 'z-10'}`}
+                } ${isDiamond ? 'rotate-45' : ''} ${isSelectedNode ? 'ring-4 ring-[#E37A08] border-[#E37A08] z-20' : 'z-10'}`}
                 style={{
                   left: `${coords.x}%`,
                   top: `${coords.y}%`,
                   width: `${coords.width}%`,
                   height: `${coords.height}%`,
-                  transform: isBeingDragged ? `translate(${mergeDrag!.dx}px, ${mergeDrag!.dy}px)` : undefined,
                 }}
               >
+                {/* Merge trigger — vacant, active, unmerged tables only */}
+                {canStartMerge && (
+                  <button
+                    type="button"
+                    aria-label={`Merge ${combinedName}`}
+                    title="Merge with other tables"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openMergeModal(table);
+                    }}
+                    className="absolute -top-2 -left-2 w-6 h-6 rounded-full bg-[#8B4513] hover:bg-[#6b350f] text-white flex items-center justify-center shadow-md z-30 cursor-pointer"
+                  >
+                    <GitMerge className="w-3 h-3" />
+                  </button>
+                )}
                 {/* Table Content Wrapper (Counter-rotates text if diamond) */}
                 <div className={`w-full h-full flex flex-col items-center justify-between ${isDiamond ? '-rotate-45' : ''}`}>
                   <div className="w-full flex items-center justify-between">
@@ -938,8 +891,6 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                       </div>
                     ) : table.isInactive ? (
                       <span className="text-[9px] font-bold uppercase text-stone-500">Blocked</span>
-                    ) : isDropHoverTarget ? (
-                      <span className="text-[9px] font-black uppercase tracking-wider text-blue-700 dark:text-blue-300">Drop to Merge</span>
                     ) : isBestFit ? (
                       <span className="text-[9px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-300">★ Best Fit</span>
                     ) : (
@@ -1364,6 +1315,116 @@ export const FloorPlan: React.FC<FloorPlanProps> = ({
                     className="flex-1 py-3 rounded-2xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shadow-md transition-colors"
                   >
                     Mark Party Finished
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          );
+        })()}
+      </AnimatePresence>
+
+      {/* MERGE TABLES PICKER MODAL */}
+      <AnimatePresence>
+        {mergeModal && (() => {
+          const anchor = tables.find((t) => t.id === mergeModal.anchorId);
+          if (!anchor) return null;
+          const anchorGroup = resolveGroupMembers(anchor, tables);
+          const anchorIds = new Set(anchorGroup.map((t) => t.id));
+
+          // Every other vacant, active table/group — selecting an already-merged
+          // group's primary folds that whole group in too.
+          const candidatePrimaries = primaries.filter(
+            (t) => !anchorIds.has(t.id) && !t.isOccupied && !t.isInactive
+          );
+
+          const combinedGroup = [
+            ...anchorGroup,
+            ...mergeModal.selectedIds.flatMap((id) => {
+              const t = tables.find((x) => x.id === id);
+              return t ? resolveGroupMembers(t, tables) : [];
+            }),
+          ];
+          const combinedCapacity = getGroupCombinedCapacity(combinedGroup);
+
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+              <motion.div
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-white dark:bg-[#26221E] rounded-3xl p-6 max-w-md w-full shadow-2xl border border-[#E8E2D2] dark:border-[#3D352E] space-y-4"
+              >
+                <div className="flex items-center justify-between pb-2 border-b border-[#E8E2D2] dark:border-[#3D352E]">
+                  <h3 className="text-base font-serif font-bold text-[#2D2926] dark:text-white flex items-center gap-2">
+                    <GitMerge className="w-4 h-4 text-[#8B4513] dark:text-[#D2B48C]" />
+                    <span>Merge {getGroupCombinedName(anchorGroup)}</span>
+                  </h3>
+                  <button onClick={() => setMergeModal(null)} className="p-1 text-[#6B5E4C] hover:opacity-80">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0]">
+                  Select any number of other vacant tables to combine with <strong>{getGroupCombinedName(anchorGroup)}</strong>. Tap a selected table again to deselect it.
+                </p>
+
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {candidatePrimaries.length === 0 && (
+                    <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0] italic py-4 text-center">
+                      No other vacant tables available to merge right now.
+                    </p>
+                  )}
+                  {candidatePrimaries.map((c) => {
+                    const cGroup = resolveGroupMembers(c, tables);
+                    const isSelected = mergeModal.selectedIds.includes(c.id);
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        role="checkbox"
+                        aria-checked={isSelected}
+                        aria-label={getGroupCombinedName(cGroup)}
+                        onClick={() => toggleMergeCandidate(c.id)}
+                        className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border-2 text-xs font-bold transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-[#8B4513]/10 border-[#8B4513] text-[#8B4513] dark:text-[#D2B48C]'
+                            : 'bg-[#F5F2EA] dark:bg-[#1C1917] border-[#E8E2D2] dark:border-[#3D352E] text-[#2D2926] dark:text-white hover:border-[#8B4513]/50'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className={`w-4 h-4 rounded-md border-2 flex items-center justify-center shrink-0 ${
+                            isSelected ? 'bg-[#8B4513] border-[#8B4513]' : 'border-[#A1917B] dark:border-[#6B5E4C]'
+                          }`}>
+                            {isSelected && <Check className="w-3 h-3 text-white" />}
+                          </span>
+                          {getGroupCombinedName(cGroup)}
+                        </span>
+                        <span className="text-[10px] font-black opacity-70">{getGroupCombinedCapacity(cGroup)}p</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center justify-between px-1 text-xs font-bold text-[#6B5E4C] dark:text-[#B8ACA0]">
+                  <span>Combined: {combinedGroup.length} table{combinedGroup.length === 1 ? '' : 's'}</span>
+                  <span>{combinedCapacity}p total capacity</span>
+                </div>
+
+                <div className="flex items-center gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setMergeModal(null)}
+                    className="flex-1 py-3 rounded-2xl bg-[#F5F2EA] dark:bg-[#1C1917] text-[#6B5E4C] dark:text-[#B8ACA0] font-bold text-xs hover:bg-[#E8E2D2] transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={mergeModal.selectedIds.length === 0}
+                    onClick={handleConfirmMerge}
+                    className="flex-1 py-3 rounded-2xl bg-[#8B4513] hover:bg-[#6b350f] disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs shadow-md transition-colors cursor-pointer"
+                  >
+                    Confirm Merge
                   </button>
                 </div>
               </motion.div>

@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test';
 import {
   test, expect, gotoCustomerView, loginAsOwner, loginAsStaff, enterPin, DEFAULT_OWNER_PIN,
-  makeBooking, makeCustomer, seedDefaultTables, dragTableOnto,
+  makeBooking, makeCustomer, seedDefaultTables, mergeTables,
 } from './fixtures';
 
 // Fixed reference dates (shared with the rest of the suite):
@@ -261,7 +261,7 @@ test.describe('Full customer + staff journeys', () => {
     await loginAsOwner(page);
 
     // Party of 12 -> merge two 6-seaters (Tables 1+2 = 12p exactly).
-    await dragTableOnto(page, 'Table 1', 'Table 2');
+    await mergeTables(page, 'Table 1', 'Table 2');
     await expect(page.getByText('Table 1+2', { exact: true })).toBeVisible({ timeout: 5000 });
     await page.getByRole('button', { name: /select to seat/i }).nth(0).click();
     await page.getByText('Table 1+2', { exact: true }).click();
@@ -269,25 +269,24 @@ test.describe('Full customer + staff journeys', () => {
     // allocateTable updates the UI optimistically before its Firestore
     // transaction actually resolves, so "Govindarajan" can appear before
     // selection-mode has really cleared -- wait for that explicitly, or the
-    // next drag below starts while selectedWaitingBooking is still set,
-    // which silently blocks handleTableMergeDragStart from starting a drag.
+    // next merge below starts while selectedWaitingBooking is still set,
+    // which the Merge trigger is hidden for.
     await expect(page.getByText(/selecting table for/i)).toHaveCount(0);
 
     // Party of 8 -> merge two more 6-seaters (Tables 9+10 = 12p, comfortably fits 8).
-    await dragTableOnto(page, 'Table 9', 'Table 10');
+    await mergeTables(page, 'Table 9', 'Table 10');
     await expect(page.getByText('Table 9+10', { exact: true })).toBeVisible({ timeout: 5000 });
     await page.getByRole('button', { name: /select to seat/i }).click();
     await page.getByText('Table 9+10', { exact: true }).click();
     await expect(page.getByText(/chandrasekhar/i).first()).toBeVisible({ timeout: 5000 });
     await expect(page.getByText(/selecting table for/i)).toHaveCount(0);
     // Let the two prior merge/allocate actions' layout (snap-together)
-    // animations fully settle before starting a third drag -- under load
-    // those animations can still be consuming rAF cycles, making the new
-    // drag's own pointermove events land less reliably.
+    // animations fully settle before starting a third merge -- under load
+    // those animations can still be consuming rAF cycles.
     await page.waitForTimeout(500);
 
     // Changed their mind: start merging two untouched vacant tables, then un-merge before ever allocating.
-    await dragTableOnto(page, 'Table 5', 'Table 6');
+    await mergeTables(page, 'Table 5', 'Table 6');
     await expect(page.getByText('Table 5+6', { exact: true })).toBeVisible({ timeout: 5000 });
     await page.getByRole('button', { name: /unmerge/i }).click();
     await expect(page.getByText('Table 5', { exact: true })).toBeVisible({ timeout: 5000 });
@@ -352,7 +351,7 @@ test.describe('Full customer + staff journeys', () => {
       // Device A merges two untouched tables while Device B, at the same instant,
       // allocates a different vacant table to the first waiting party.
       await Promise.all([
-        dragTableOnto(staffA, 'Table 9', 'Table 10'),
+        mergeTables(staffA, 'Table 9', 'Table 10'),
         (async () => {
           await staffB.getByRole('button', { name: /select to seat/i }).first().click();
           await staffB.getByText('Table 1', { exact: true }).click();
@@ -465,7 +464,7 @@ test.describe('Full customer + staff journeys', () => {
       await expect(page.getByText(/^1 waiting$/i)).toBeVisible({ timeout: 5000 });
 
       // Merge two small tables and quick-seat a fresh walk-in directly onto the combined unit.
-      await dragTableOnto(page, 'Table 5', 'Table 6');
+      await mergeTables(page, 'Table 5', 'Table 6');
       await expect(page.getByText('Table 5+6', { exact: true })).toBeVisible({ timeout: 5000 });
       await page.getByText('Table 5+6', { exact: true }).click();
       await expect(page.getByText(/quick seat — table 5\+6/i)).toBeVisible();

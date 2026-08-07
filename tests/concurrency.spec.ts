@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test';
-import { test, expect, gotoCustomerView, loginAsOwner, makeBooking, seedDefaultTables, dragTableOnto } from './fixtures';
+import { test, expect, gotoCustomerView, loginAsOwner, makeBooking, seedDefaultTables, mergeTables } from './fixtures';
 
 async function acceptWalkInConditions(page: Page) {
   await page.getByRole('checkbox').check();
@@ -177,11 +177,12 @@ test.describe('Concurrency / load', () => {
       // request with table 2's now-existing partner (that's how growing a
       // pair to a trio is designed to work), so a consistent 3-way group
       // [1,2,3] is an equally valid, safe outcome — not a "loser". What
-      // must never happen is a torn/inconsistent state (e.g. table 2
-      // claiming a partner that doesn't reciprocate) or a group over 3.
+      // must never happen is a torn/inconsistent state, e.g. table 2
+      // claiming a partner that doesn't reciprocate, or picking up a table
+      // neither device ever requested.
       await Promise.all([
-        dragTableOnto(pageA, 'Table 1', 'Table 2'),
-        dragTableOnto(pageB, 'Table 2', 'Table 3'),
+        mergeTables(pageA, 'Table 1', 'Table 2'),
+        mergeTables(pageB, 'Table 2', 'Table 3'),
       ]);
       await pageA.waitForTimeout(1500);
 

@@ -1432,10 +1432,6 @@ export const dataService = {
           await getSnap(id);
         }
 
-        if (allIds.size > 3) {
-          return { success: false, error: 'Maximum 3 tables can be merged together.' };
-        }
-
         for (const id of allIds) {
           const snap = snaps.get(id)!;
           if (!snap.exists()) {

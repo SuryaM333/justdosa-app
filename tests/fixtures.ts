@@ -229,16 +229,34 @@ export async function loginAsOwner(page: Page, opts: { pin?: string } = {}): Pro
 }
 
 /**
- * Simulates the floor plan's drag-to-merge gesture with real mouse events
- * (matching the raw pointer-event drag implementation in FloorPlan.tsx —
- * not Framer Motion's `drag` prop). Locates each table card by its exact
- * visible text (its current combined name, e.g. "Table 1" or "Table 1+2"),
- * so callers must pass whatever name is currently showing at that step.
+ * Merges tables via the floor plan's tap-to-select picker: clicks the
+ * "Merge {anchorName}" trigger on the unmerged anchor table, checks off each
+ * of `otherNames` in the picker (toggling a candidate again would deselect
+ * it — see mergeTablesWithDeselect below for that path), then confirms.
+ * Only unmerged, vacant tables carry a Merge trigger — to fold a 3rd table
+ * into an existing pair, pass the *unmerged* table as the anchor and the
+ * existing group's combined name (e.g. "Table 1+2") as one of `otherNames`.
  */
-export async function dragTableOnto(page: Page, fromName: string, toName: string): Promise<void> {
+export async function mergeTables(page: Page, anchorName: string, otherNames: string | string[]): Promise<void> {
+  const others = Array.isArray(otherNames) ? otherNames : [otherNames];
+  await page.getByRole('button', { name: `Merge ${anchorName}`, exact: true }).click();
+  for (const name of others) {
+    await page.getByRole('checkbox', { name, exact: true }).click();
+  }
+  await page.getByRole('button', { name: /^confirm merge$/i }).click();
+}
+
+/**
+ * Simulates the floor plan's edit-mode table repositioning drag with real
+ * mouse events (matching the raw pointer-event drag implementation in
+ * FloorPlan.tsx — not Framer Motion's `drag` prop). Locates each table card
+ * by its exact visible text and drags from one card's position to another's.
+ * Edit mode only ever repositions tables — it never merges them.
+ */
+export async function dragTableToPosition(page: Page, fromName: string, toName: string): Promise<void> {
   const fromBox = await page.getByText(fromName, { exact: true }).boundingBox();
   const toBox = await page.getByText(toName, { exact: true }).boundingBox();
-  if (!fromBox || !toBox) throw new Error(`dragTableOnto: could not locate "${fromName}" or "${toName}"`);
+  if (!fromBox || !toBox) throw new Error(`dragTableToPosition: could not locate "${fromName}" or "${toName}"`);
 
   const startX = fromBox.x + fromBox.width / 2;
   const startY = fromBox.y + fromBox.height / 2;
@@ -247,15 +265,15 @@ export async function dragTableOnto(page: Page, fromName: string, toName: string
 
   await page.mouse.move(startX, startY);
   await page.mouse.down();
-  await page.mouse.move(startX + 20, startY + 10, { steps: 5 }); // cross the 8px drag threshold
+  await page.mouse.move(startX + 20, startY + 10, { steps: 5 });
   await page.mouse.move(endX, endY, { steps: 10 });
   // A final zero-distance move plus a short dwell gives React's pointermove
-  // handler (which recomputes the hover target on every event) a moment to
-  // process the true final position and re-render the hover-highlight state
-  // before release, rather than racing ahead of it -- observed to matter
-  // specifically under heavier system load (e.g. deep into a long full-suite
-  // run), where an intermediate/final move event can otherwise be coalesced
-  // or its resulting state update not yet flushed by the time mouse.up fires.
+  // handler a moment to process the true final position and flush the
+  // resulting position update before release, rather than racing ahead of
+  // it -- observed to matter specifically under heavier system load (e.g.
+  // deep into a long full-suite run), where an intermediate/final move
+  // event can otherwise be coalesced or its state update not yet flushed
+  // by the time mouse.up fires.
   await page.mouse.move(endX, endY);
   await page.waitForTimeout(400);
   await page.mouse.up();

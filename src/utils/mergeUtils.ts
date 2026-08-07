@@ -64,20 +64,3 @@ export function getGroupCombinedOrderingUrl(members: Table[]): string | undefine
   }
   return undefined;
 }
-
-/**
- * UI-side pre-check before attempting a drag-merge (the dataService transaction
- * re-validates occupancy/size independently and is the real source of truth —
- * this only avoids firing an attempt that's obviously going to fail).
- */
-export function canMerge(a: Table, b: Table, allTables: Table[]): { ok: boolean; reason?: string } {
-  if (a.id === b.id) return { ok: false, reason: 'Cannot merge a table with itself.' };
-  if (a.isOccupied || b.isOccupied) return { ok: false, reason: 'Can only merge vacant tables.' };
-  if (a.isInactive || b.isInactive) return { ok: false, reason: 'Can only merge active tables.' };
-  const groupA = resolveGroupMembers(a, allTables);
-  if (groupA.some((t) => t.id === b.id)) return { ok: false, reason: 'These tables are already merged.' };
-  const groupB = resolveGroupMembers(b, allTables);
-  const combinedIds = new Set([...groupA.map((t) => t.id), ...groupB.map((t) => t.id)]);
-  if (combinedIds.size > 3) return { ok: false, reason: 'Maximum 3 tables can be merged together.' };
-  return { ok: true };
-}
