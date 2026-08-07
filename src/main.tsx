@@ -73,7 +73,7 @@ class GlobalErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySta
             </div>
 
             <div className="text-sm text-[#B8ACA0] leading-relaxed max-w-xs mx-auto">
-              {this.state.error?.message || 'An unexpected error occurred. Please try reloading the application.'}
+              An unexpected error occurred. Please try reloading the application.
             </div>
 
             <div className="pt-2">

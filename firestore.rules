@@ -110,5 +110,17 @@ service cloud.firestore {
       allow write: if isMap(request.resource.data)
         && request.resource.data.guestsCount is number;
     }
+
+    // ---- audit_log ----
+    // Append-only trail of admin actions (see dataService.ts's logAuditEvent).
+    // Same open-read limitation as everything else here (no Firebase Auth to
+    // gate on) — but entries can only ever be created, never updated or
+    // deleted, so the trail itself can't be tampered with after the fact.
+    match /audit_log/{entryId} {
+      allow read: if true;
+      allow create: if isMap(request.resource.data)
+        && request.resource.data.action is string
+        && request.resource.data.timestamp is string;
+    }
   }
 }

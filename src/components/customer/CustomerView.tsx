@@ -1447,28 +1447,33 @@ export const CustomerView: React.FC = () => {
                   </div>
                 </div>
 
-                <p className="text-[11px] text-[#6B5E4C] dark:text-[#B8ACA0] -mt-1.5">
-                  Online booking is available up to {MAX_ADVANCE_BOOKING_DAYS} days ahead. Need a date further out?{' '}
-                  <a
-                    href={`tel:${cleanPhoneNumber(dataService.getWhatsAppNumber())}`}
-                    className="font-bold text-[#8B4513] dark:text-[#E37A08] underline hover:opacity-80"
-                  >
-                    Call us
-                  </a>
-                  {' '}or{' '}
-                  <a
-                    href={getWhatsAppUrl(
-                      dataService.getWhatsAppNumber(),
-                      'Hi Just Dosa team, I would like to book a table for a date beyond the next 3 days.'
-                    )}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-bold text-[#22C55E] dark:text-[#22C55E] underline hover:opacity-80"
-                  >
-                    WhatsApp us
-                  </a>
-                  .
-                </p>
+                {/* Kalyana's own contact card (below) already covers this exact
+                    message for that path — showing both is redundant and, worse,
+                    doubles up the "Call us" link the Kalyana card also offers. */}
+                {!(getDayOfWeek(bookingDate) === 6 && dataService.isKalyanaEnabled() && saturdayMenuType === 'kalyana') && (
+                  <p className="text-[11px] text-[#6B5E4C] dark:text-[#B8ACA0] -mt-1.5">
+                    Online booking is available up to {MAX_ADVANCE_BOOKING_DAYS} days ahead. Need a date further out?{' '}
+                    <a
+                      href={`tel:${cleanPhoneNumber(dataService.getWhatsAppNumber())}`}
+                      className="font-bold text-[#8B4513] dark:text-[#E37A08] underline hover:opacity-80"
+                    >
+                      Call us
+                    </a>
+                    {' '}or{' '}
+                    <a
+                      href={getWhatsAppUrl(
+                        dataService.getWhatsAppNumber(),
+                        'Hi Just Dosa team, I would like to book a table for a date beyond the next 3 days.'
+                      )}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-bold text-[#22C55E] dark:text-[#22C55E] underline hover:opacity-80"
+                    >
+                      WhatsApp us
+                    </a>
+                    .
+                  </p>
+                )}
 
                 {/* Saturday Menu Selection Question */}
                 {getDayOfWeek(bookingDate) === 6 && dataService.isKalyanaEnabled() && (
@@ -1623,8 +1628,14 @@ export const CustomerView: React.FC = () => {
               </motion.div>
             )}
 
-            {/* Render online form fields and submit button only if NOT Kalyana Virundhu on Saturday */}
-            {!(getDayOfWeek(bookingDate) === 6 && dataService.isKalyanaEnabled() && saturdayMenuType === 'kalyana') && (
+            {/* Render online form fields and submit button only if NOT Kalyana Virundhu on Saturday.
+                This exclusion only ever makes sense for the "book for later" (remote) flow, which is
+                the only tab with a date field — walk-in has no date picker, but bookingDate still
+                defaults to tomorrow's date under the hood, and the Kalyana auto-select effect above
+                fires off that default regardless of tab. Without the activeTab check, the walk-in
+                form's own fields/submit button would silently vanish on any day where tomorrow is a
+                Saturday and Kalyana is enabled (i.e. every Friday) -- not a Saturday-only edge case. */}
+            {!(activeTab === 'remote' && getDayOfWeek(bookingDate) === 6 && dataService.isKalyanaEnabled() && saturdayMenuType === 'kalyana') && (
               <>
                 {/* Adults and Children Counts */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

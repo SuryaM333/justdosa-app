@@ -330,8 +330,9 @@ export const SettingsTab: React.FC = () => {
       await dataService.saveTables(cleanedTables);
 
       showToastMsg('All restaurant configurations saved and propagated live successfully!');
-    } catch (err: any) {
-      showToastMsg(err?.message || 'Failed to save configurations.', 'error');
+    } catch (err) {
+      console.error('Failed to save settings:', err);
+      showToastMsg('Failed to save configurations. Please try again.', 'error');
     }
   };
 

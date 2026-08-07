@@ -291,6 +291,31 @@ async function safeRunTransaction(db: any, updateFunction: (transaction: any) =>
 }
 
 // ----------------------------------------------------
+// AUDIT LOG
+// ----------------------------------------------------
+// Append-only trail of admin actions, written best-effort from inside each
+// mutating dataService method (one call site per business action, not per
+// UI trigger — several UI call sites often share one dataService method).
+// Never blocks or throws into the caller: a failed audit write must not
+// stop the real action from succeeding.
+async function logAuditEvent(action: string, details: Record<string, any> = {}): Promise<void> {
+  try {
+    const id = `al-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const role = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('just_dosa_admin_role') : null;
+    await safeSetDoc(doc(db, 'audit_log', id), {
+      id,
+      timestamp: new Date().toISOString(),
+      action,
+      role: role === 'owner' || role === 'staff' ? role : null,
+      handledBy: getSessionHandledBy() || null,
+      details,
+    });
+  } catch (err) {
+    console.warn('Audit log write failed (non-fatal):', err);
+  }
+}
+
+// ----------------------------------------------------
 // REAL-TIME CACHE & STATE DEFINITIONS
 // ----------------------------------------------------
 let cachedTables: Table[] = [];
@@ -762,6 +787,12 @@ if (typeof window !== 'undefined') {
 // PUBLIC DATA SERVICE EXPORTS
 // ----------------------------------------------------
 export const dataService = {
+  // Public wrapper so pre-session-state events (PIN login success/failure/
+  // lockout, in PINModal.tsx) can also write to the audit log.
+  logAuditEvent(action: string, details: Record<string, any> = {}): Promise<void> {
+    return logAuditEvent(action, details);
+  },
+
   subscribe(listener: Listener): () => void {
     listeners.add(listener);
     return () => {
@@ -785,6 +816,7 @@ export const dataService = {
     try {
       const hash = await hashPin(pin);
       await safeSetDoc(doc(db, 'settings_secure', 'pins'), { staffPinHash: hash }, { merge: true });
+      logAuditEvent('settings.setStaffPin'); // never log the PIN itself
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings_secure/pins');
     }
@@ -794,6 +826,7 @@ export const dataService = {
     try {
       const hash = await hashPin(pin);
       await safeSetDoc(doc(db, 'settings_secure', 'pins'), { ownerPinHash: hash }, { merge: true });
+      logAuditEvent('settings.setOwnerPin'); // never log the PIN itself
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings_secure/pins');
     }
@@ -812,6 +845,7 @@ export const dataService = {
   async saveAllSettings(settings: any) {
     try {
       await safeSetDoc(settingsDocRef(), settings, { merge: true });
+      logAuditEvent('settings.saveAll');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -1197,18 +1231,22 @@ export const dataService = {
       }
       await safeSetDoc(settingsDocRef(), updates, { merge: true });
       notifyListeners();
+      logAuditEvent('floorplan.resizeCanvas');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
   },
 
   async finishTable(tableId: number): Promise<{ success: boolean; error?: string }> {
+    // Delegates to finishSeatedParty, which logs the audit event — no
+    // separate entry here to avoid double-logging the same action.
     return this.finishSeatedParty(tableId);
   },
 
   async addQuickWalkinAndSeat(data: { tableId: number; partySize: number; name?: string; phone?: string; serverName?: string }): Promise<{ success: boolean; error?: string }> {
     // No fake default phone here: a shared placeholder would silently merge
     // every phone-less walk-in into one "customer" (see seatWalkInDirectly).
+    // Delegates to seatWalkInDirectly, which logs the audit event.
     return this.seatWalkInDirectly(data.tableId, data.partySize, data.name || 'Walk-In', data.phone || '', 0, data.serverName);
   },
 
@@ -1222,6 +1260,7 @@ export const dataService = {
   async setLandmarks(landmarks: LandmarkPosition[]) {
     try {
       await safeSetDoc(settingsDocRef(), { landmarks }, { merge: true });
+      logAuditEvent('floorplan.setLandmarks', { count: landmarks.length });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -1258,6 +1297,7 @@ export const dataService = {
         isNewAlert: false
       }, { merge: true });
       await this.syncSlotOccupancyForBookingId(bookingId);
+      logAuditEvent('booking.proposeAltTime', { bookingId, altDate, altTime });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
     }
@@ -1313,6 +1353,7 @@ export const dataService = {
         batch.set(doc(db, 'tables', t.id.toString()), sanitizeOutgoingData(t));
       });
       await batch.commit();
+      logAuditEvent('floorplan.saveTables', { count: validTables.length });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'tables');
     }
@@ -1355,6 +1396,7 @@ export const dataService = {
       // Same anon-{bookingId} doc-id exception as deleteCustomer above.
       const cleaned = phoneKey.startsWith('anon-') ? phoneKey : cleanPhoneNumber(phoneKey);
       await safeSetDoc(doc(db, 'customers', cleaned), updates, { merge: true });
+      logAuditEvent('customer.update', { phoneKey: cleaned });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'customers');
     }
@@ -1372,6 +1414,7 @@ export const dataService = {
   async setStaffList(staffList: string[]) {
     try {
       await safeSetDoc(settingsDocRef(), { staffList }, { merge: true });
+      logAuditEvent('settings.setStaffList', { staffList });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'settings/global');
     }
@@ -1394,6 +1437,7 @@ export const dataService = {
           }, { merge: true });
         }
       }
+      logAuditEvent('table.assignServer', { tableId, serverName });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `tables/${tableId}`);
     }
@@ -1456,6 +1500,9 @@ export const dataService = {
         }
         return { success: true };
       });
+      if (result.success) {
+        logAuditEvent('table.merge', { tableIds: requestedIds });
+      }
       return result;
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `tables/merge/${requestedIds.join('_')}`);
@@ -1492,6 +1539,9 @@ export const dataService = {
         }
         return { success: true };
       });
+      if (result.success) {
+        logAuditEvent('table.unmerge', { tableId });
+      }
       return result;
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `tables/unmerge/${tableId}`);
@@ -1816,6 +1866,7 @@ export const dataService = {
           });
         });
 
+        logAuditEvent('booking.createManual', { bookingId, firstName: data.firstName, partySize: data.partySize, type: data.type });
         return newBooking!;
       } catch (error: any) {
         if (error.message === 'SLOT_FULL') {
@@ -1888,6 +1939,7 @@ export const dataService = {
           this.updateAllWaitingEstimates(); // fire-and-forget: recalculates queue estimates in the background so the primary action (seat/finish/cancel/etc.) doesn't wait on a second Firestore round-trip before the UI updates
         }
 
+        logAuditEvent('booking.createManual', { bookingId, firstName: data.firstName, partySize: data.partySize, type: data.type });
         return newBooking;
       } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, 'bookings');
@@ -2061,6 +2113,7 @@ export const dataService = {
       if (result.success) {
         this.updateAllWaitingEstimates(); // fire-and-forget: recalculates queue estimates in the background so the primary action (seat/finish/cancel/etc.) doesn't wait on a second Firestore round-trip before the UI updates
         await this.syncSlotOccupancyForBookingId(bookingId);
+        logAuditEvent('table.allocate', { bookingId, tableId });
       } else {
         cachedTables = prevTables;
         cachedBookings = prevBookings;
@@ -2209,6 +2262,7 @@ export const dataService = {
       if (bId) {
         await this.syncSlotOccupancyForBookingId(bId);
       }
+      logAuditEvent('table.finishSeated', { tableId, bookingId: bId || null });
       return { success: true };
     } catch (error) {
       // Roll back the optimistic update: without this, a failed write left
@@ -2331,6 +2385,7 @@ export const dataService = {
       }, { merge: true });
       this.updateAllWaitingEstimates(); // fire-and-forget: recalculates queue estimates in the background so the primary action (seat/finish/cancel/etc.) doesn't wait on a second Firestore round-trip before the UI updates
       await this.syncSlotOccupancyForBookingId(bookingId);
+      logAuditEvent('booking.arrived', { bookingId });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
     }
@@ -2356,6 +2411,7 @@ export const dataService = {
       }
       await safeSetDoc(doc(db, 'bookings', bookingId), bookingUpdate, { merge: true });
       await this.syncSlotOccupancyForBookingId(bookingId);
+      logAuditEvent('booking.confirm', { bookingId });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
     }
@@ -2373,6 +2429,7 @@ export const dataService = {
         status: 'declined',
         isNewAlert: false
       }, { merge: true });
+      logAuditEvent('booking.decline', { bookingId });
       await this.syncSlotOccupancyForBookingId(bookingId);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
@@ -2467,6 +2524,7 @@ export const dataService = {
 
       if (result.success) {
         this.updateAllWaitingEstimates(); // fire-and-forget: recalculates queue estimates in the background so the primary action (seat/finish/cancel/etc.) doesn't wait on a second Firestore round-trip before the UI updates
+        logAuditEvent('table.quickSeat', { bookingId, tableId, name, partySize });
       }
       return result;
     } catch (error) {
@@ -2515,6 +2573,7 @@ export const dataService = {
         }
         this.updateAllWaitingEstimates(); // fire-and-forget: recalculates queue estimates in the background so the primary action (seat/finish/cancel/etc.) doesn't wait on a second Firestore round-trip before the UI updates
         await this.syncSlotOccupancyForBookingId(bookingId);
+        logAuditEvent('booking.noShow', { bookingId });
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
@@ -2544,6 +2603,7 @@ export const dataService = {
         }
         this.updateAllWaitingEstimates(); // fire-and-forget: recalculates queue estimates in the background so the primary action (seat/finish/cancel/etc.) doesn't wait on a second Firestore round-trip before the UI updates
         await this.syncSlotOccupancyForBookingId(bookingId);
+        logAuditEvent('booking.cancel', { bookingId });
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `bookings/${bookingId}`);
@@ -2703,6 +2763,7 @@ export const dataService = {
       // target the wrong (or an invalid) doc, so pass those through as-is.
       const cleaned = phoneKey.startsWith('anon-') ? phoneKey : cleanPhoneNumber(phoneKey);
       await safeDeleteDoc(doc(db, 'customers', cleaned));
+      logAuditEvent('customer.delete', { phoneKey: cleaned });
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `customers/${phoneKey}`);
     }
@@ -2757,6 +2818,7 @@ export const dataService = {
       });
 
       await safeCommitBatch(batch);
+      logAuditEvent('customer.merge', { primaryPhoneKey: primaryClean, secondaryPhoneKey: secondaryClean });
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, 'customers');
     }

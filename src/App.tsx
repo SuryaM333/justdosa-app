@@ -1,4 +1,4 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { Navbar } from './components/Navbar';
 import { CustomerView } from './components/customer/CustomerView';
 import { PINModal } from './components/admin/PINModal';
@@ -7,6 +7,38 @@ import { Booking, AdminRole } from './types';
 import { LOGO_BASE64 } from './components/logoBase64';
 import { APP_VERSION } from './version';
 import { getInitialTheme, getTimeBasedDefaultTheme } from './utils/theme';
+
+// A staff tablet left logged in and untouched auto-locks after this long,
+// independent of the 12h absolute session cap below.
+const ADMIN_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+// How often an activity listener is allowed to touch sessionStorage — avoids
+// writing on every single mousemove/keydown.
+const ADMIN_ACTIVITY_WRITE_THROTTLE_MS = 15 * 1000;
+
+function clearAdminSessionStorage() {
+  sessionStorage.removeItem('just_dosa_admin_auth');
+  sessionStorage.removeItem('just_dosa_admin_role');
+  sessionStorage.removeItem('just_dosa_admin_auth_time');
+  sessionStorage.removeItem('just_dosa_admin_last_activity');
+}
+
+// True if a stored admin session exists and is within both the 12h absolute
+// cap and the idle-inactivity cap. Shared by every place (initial page load
+// x3, plus the polling check) that needs to answer "is this still logged in?"
+function hasActiveAdminSession(): boolean {
+  const auth = sessionStorage.getItem('just_dosa_admin_auth') === 'true';
+  const authTime = sessionStorage.getItem('just_dosa_admin_auth_time');
+  if (!auth || !authTime) return false;
+
+  const timeElapsed = Date.now() - parseInt(authTime, 10);
+  if (timeElapsed >= 12 * 60 * 60 * 1000) return false;
+
+  const lastActivity = sessionStorage.getItem('just_dosa_admin_last_activity');
+  const idleElapsed = Date.now() - (lastActivity ? parseInt(lastActivity, 10) : parseInt(authTime, 10));
+  if (idleElapsed >= ADMIN_IDLE_TIMEOUT_MS) return false;
+
+  return true;
+}
 
 function safeLazy<T extends React.ComponentType<any>>(importFunc: () => Promise<{ default: T }>): React.LazyExoticComponent<T> {
   return lazy(() => 
@@ -38,11 +70,7 @@ export default function App() {
     const isAdminDevice = localStorage.getItem('just_dosa_admin_device_v2') === 'true';
     const hasAdminHash = window.location.hash === '#/admin' || window.location.hash === '#admin' || window.location.hash.startsWith('#/admin/') || window.location.hash.startsWith('#admin/');
 
-    const auth = sessionStorage.getItem('just_dosa_admin_auth') === 'true';
-    const authTime = sessionStorage.getItem('just_dosa_admin_auth_time');
-    const hasActiveAdminSession = auth && authTime && (Date.now() - parseInt(authTime, 10) < 12 * 60 * 60 * 1000);
-
-    if (isModeAdmin || (isAdminDevice && hasAdminHash) || hasActiveAdminSession) {
+    if (isModeAdmin || (isAdminDevice && hasAdminHash) || hasActiveAdminSession()) {
       return '#/admin';
     }
     return window.location.hash;
@@ -64,31 +92,19 @@ export default function App() {
     if (isCustomerOnly) {
       return false;
     }
-    const auth = sessionStorage.getItem('just_dosa_admin_auth') === 'true';
-    const authTime = sessionStorage.getItem('just_dosa_admin_auth_time');
-    if (auth && authTime) {
-      const timeElapsed = Date.now() - parseInt(authTime, 10);
-      if (timeElapsed < 12 * 60 * 60 * 1000) {
-        return true;
-      }
+    if (hasActiveAdminSession()) {
+      return true;
     }
     // Otherwise clear any saved state to invalidate session
-    sessionStorage.removeItem('just_dosa_admin_auth');
-    sessionStorage.removeItem('just_dosa_admin_role');
-    sessionStorage.removeItem('just_dosa_admin_auth_time');
+    clearAdminSessionStorage();
     return false;
   });
   const [adminRole, setAdminRole] = useState<AdminRole | null>(() => {
     if (isCustomerOnly) {
       return null;
     }
-    const auth = sessionStorage.getItem('just_dosa_admin_auth') === 'true';
-    const authTime = sessionStorage.getItem('just_dosa_admin_auth_time');
-    if (auth && authTime) {
-      const timeElapsed = Date.now() - parseInt(authTime, 10);
-      if (timeElapsed < 12 * 60 * 60 * 1000) {
-        return (sessionStorage.getItem('just_dosa_admin_role') as AdminRole) || null;
-      }
+    if (hasActiveAdminSession()) {
+      return (sessionStorage.getItem('just_dosa_admin_role') as AdminRole) || null;
     }
     return null;
   });
@@ -211,25 +227,13 @@ export default function App() {
     };
   }, [isDarkMode]);
 
-  // Session timeout checking useEffect
+  // Session timeout checking useEffect — enforces both the 12h absolute cap
+  // and the idle-inactivity cap against the last-activity tracker below.
   useEffect(() => {
     if (isAdminAuthenticated) {
       const checkSession = () => {
-        const auth = sessionStorage.getItem('just_dosa_admin_auth') === 'true';
-        const authTime = sessionStorage.getItem('just_dosa_admin_auth_time');
-        if (auth && authTime) {
-          const timeElapsed = Date.now() - parseInt(authTime, 10);
-          if (timeElapsed >= 12 * 60 * 60 * 1000) {
-            sessionStorage.removeItem('just_dosa_admin_auth');
-            sessionStorage.removeItem('just_dosa_admin_role');
-            sessionStorage.removeItem('just_dosa_admin_auth_time');
-            setIsAdminAuthenticated(false);
-            setAdminRole(null);
-          }
-        } else {
-          sessionStorage.removeItem('just_dosa_admin_auth');
-          sessionStorage.removeItem('just_dosa_admin_role');
-          sessionStorage.removeItem('just_dosa_admin_auth_time');
+        if (!hasActiveAdminSession()) {
+          clearAdminSessionStorage();
           setIsAdminAuthenticated(false);
           setAdminRole(null);
         }
@@ -239,6 +243,29 @@ export default function App() {
       const interval = setInterval(checkSession, 10000); // Check every 10 seconds
       return () => clearInterval(interval);
     }
+  }, [isAdminAuthenticated]);
+
+  // Tracks admin activity (pointer/keyboard input) so the idle-timeout check
+  // above has a real "last touched" timestamp to compare against. Throttled
+  // to avoid hitting sessionStorage on every mousemove/keydown.
+  const lastActivityWriteRef = useRef(0);
+  useEffect(() => {
+    if (!isAdminAuthenticated) return;
+
+    const recordActivity = () => {
+      const now = Date.now();
+      if (now - lastActivityWriteRef.current < ADMIN_ACTIVITY_WRITE_THROTTLE_MS) return;
+      lastActivityWriteRef.current = now;
+      sessionStorage.setItem('just_dosa_admin_last_activity', now.toString());
+    };
+
+    recordActivity();
+    window.addEventListener('pointerdown', recordActivity);
+    window.addEventListener('keydown', recordActivity);
+    return () => {
+      window.removeEventListener('pointerdown', recordActivity);
+      window.removeEventListener('keydown', recordActivity);
+    };
   }, [isAdminAuthenticated]);
 
   useEffect(() => {
@@ -319,6 +346,7 @@ export default function App() {
     sessionStorage.setItem('just_dosa_admin_auth', 'true');
     sessionStorage.setItem('just_dosa_admin_role', role);
     sessionStorage.setItem('just_dosa_admin_auth_time', Date.now().toString());
+    sessionStorage.setItem('just_dosa_admin_last_activity', Date.now().toString());
     localStorage.setItem('just_dosa_admin_device_v2', 'true');
     setIsAdminAuthenticated(true);
     setAdminRole(role);
@@ -339,9 +367,7 @@ export default function App() {
   };
 
   const handleExitAdmin = () => {
-    sessionStorage.removeItem('just_dosa_admin_auth');
-    sessionStorage.removeItem('just_dosa_admin_role');
-    sessionStorage.removeItem('just_dosa_admin_auth_time');
+    clearAdminSessionStorage();
     sessionStorage.removeItem('just_dosa_staff_name');
     setIsAdminAuthenticated(false);
     setAdminRole(null);

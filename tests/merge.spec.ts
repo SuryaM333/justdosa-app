@@ -33,6 +33,11 @@ test.describe('Select-based table merge', () => {
     await page.getByRole('checkbox', { name: 'Table 2', exact: true }).click();
     await page.getByRole('button', { name: /^confirm merge$/i }).click();
 
+    // Wait for the modal itself (and its own "Table 2" checkbox row) to fully
+    // leave the DOM before checking the floor plan — otherwise its exit
+    // animation can still have that checkbox mounted, and a plain
+    // getByText('Table 2') strict-mode-fails against both it and the card.
+    await expect(page.getByRole('button', { name: /^confirm merge$/i })).toHaveCount(0);
     await expect(page.getByText('Table 1+3', { exact: true })).toBeVisible({ timeout: 5000 });
     await expect(page.getByText('Table 2', { exact: true })).toBeVisible();
 
@@ -52,6 +57,10 @@ test.describe('Select-based table merge', () => {
     await page.getByRole('checkbox', { name: 'Table 2', exact: true }).click();
     await page.getByRole('button', { name: /^cancel$/i }).click();
 
+    // Same reasoning as the confirm-merge test above: wait for the modal
+    // (whose body text includes "<strong>Table 1</strong>") to fully leave
+    // the DOM before asserting on the floor plan's own "Table 1"/"Table 2".
+    await expect(page.getByRole('button', { name: /^cancel$/i })).toHaveCount(0);
     await expect(page.getByText('Table 1', { exact: true })).toBeVisible();
     await expect(page.getByText('Table 2', { exact: true })).toBeVisible();
     await expect(page.getByText('Table 1+2', { exact: true })).toHaveCount(0);

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { AdminRole } from '../../types';
 import { dataService } from '../../services/dataService';
 import { LOGO_BASE64 } from '../logoBase64';
+import { getLockoutState, recordFailure, recordSuccess } from '../../utils/pinLockout';
 
 // Helper hook to detect user reduced motion preference
 function usePrefersReducedMotion() {
@@ -35,14 +36,29 @@ export const PINModal: React.FC<PINModalProps> = ({
   const [error, setError] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [step, setStep] = useState<'intro' | 'lock' | 'pin'>('intro');
+  const [lockoutRemainingMs, setLockoutRemainingMs] = useState(0);
 
   const prefersReducedMotion = usePrefersReducedMotion();
+
+  // Ticks the lockout countdown once a second while active; clears itself
+  // once the cooldown expires so the keypad re-enables without needing a
+  // fresh PIN digit to trigger a re-render.
+  useEffect(() => {
+    if (lockoutRemainingMs <= 0) return;
+    const interval = setInterval(() => {
+      const state = getLockoutState();
+      setLockoutRemainingMs(state.locked ? state.remainingMs : 0);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [lockoutRemainingMs > 0]);
 
   useEffect(() => {
     if (isOpen) {
       setPin('');
       setError(false);
       setIsVerifying(false);
+      const lockoutState = getLockoutState();
+      setLockoutRemainingMs(lockoutState.locked ? lockoutState.remainingMs : 0);
 
       const skipIntro = sessionStorage.getItem('just_dosa_skip_welcome_intro') === 'true';
       if (skipIntro) {
@@ -62,11 +78,11 @@ export const PINModal: React.FC<PINModalProps> = ({
   if (!isOpen) return null;
 
   const handleNumberClick = (num: string) => {
-    if (pin.length < 4 && !isVerifying) {
+    if (pin.length < 4 && !isVerifying && lockoutRemainingMs <= 0) {
       const nextPin = pin + num;
       setPin(nextPin);
       setError(false);
-      
+
       // Auto-submit when exactly 4 digits are entered
       if (nextPin.length === 4) {
         setIsVerifying(true);
@@ -76,12 +92,19 @@ export const PINModal: React.FC<PINModalProps> = ({
             const isStaff = await dataService.verifyStaffPin(nextPin);
 
             if (isOwner) {
+              recordSuccess();
+              dataService.logAuditEvent('pin.login.success', { role: 'owner' });
               onSuccess('owner');
               setPin('');
             } else if (isStaff) {
+              recordSuccess();
+              dataService.logAuditEvent('pin.login.success', { role: 'staff' });
               onSuccess('staff');
               setPin('');
             } else {
+              const lockout = recordFailure();
+              setLockoutRemainingMs(lockout.remainingMs);
+              dataService.logAuditEvent(lockout.locked ? 'pin.login.lockout' : 'pin.login.failure');
               setError(true);
               setIsVerifying(false);
               // Shake effect will trigger, reset PIN after shake
@@ -333,7 +356,16 @@ export const PINModal: React.FC<PINModalProps> = ({
                 {/* Status Messages */}
                 <div className="h-6 flex items-center justify-center">
                   <AnimatePresence mode="wait">
-                    {error ? (
+                    {lockoutRemainingMs > 0 ? (
+                      <motion.p
+                        initial={{ opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 4 }}
+                        className="text-xs font-bold text-[#EF4444] tracking-wider"
+                      >
+                        TOO MANY ATTEMPTS • TRY AGAIN IN {Math.ceil(lockoutRemainingMs / 1000)}S
+                      </motion.p>
+                    ) : error ? (
                       <motion.p
                         initial={{ opacity: 0, y: -4 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -370,18 +402,18 @@ export const PINModal: React.FC<PINModalProps> = ({
                     key={num}
                     type="button"
                     onClick={() => handleNumberClick(num.toString())}
-                    disabled={isVerifying}
+                    disabled={isVerifying || lockoutRemainingMs > 0}
                     className="h-13 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-lg border border-white/10 shadow-xs hover:border-white/20 active:scale-95 transition-all duration-150 flex items-center justify-center cursor-pointer disabled:opacity-40"
                   >
                     {num}
                   </button>
                 ))}
-                
+
                 {/* Clear Button */}
                 <button
                   type="button"
                   onClick={handleClear}
-                  disabled={isVerifying || pin.length === 0}
+                  disabled={isVerifying || pin.length === 0 || lockoutRemainingMs > 0}
                   className="h-13 rounded-xl bg-white/5 hover:bg-[#EF4444]/15 hover:text-[#EF4444] hover:border-[#EF4444]/20 text-white/70 font-semibold text-xs border border-white/10 active:scale-95 transition-all duration-150 flex items-center justify-center cursor-pointer disabled:opacity-30"
                 >
                   CLEAR
@@ -391,7 +423,7 @@ export const PINModal: React.FC<PINModalProps> = ({
                 <button
                   type="button"
                   onClick={() => handleNumberClick('0')}
-                  disabled={isVerifying}
+                  disabled={isVerifying || lockoutRemainingMs > 0}
                   className="h-13 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-lg border border-white/10 shadow-xs hover:border-white/20 active:scale-95 transition-all duration-150 flex items-center justify-center cursor-pointer disabled:opacity-40"
                 >
                   0
