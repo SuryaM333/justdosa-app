@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import * as Sentry from '@sentry/react';
 import { Navbar } from './components/Navbar';
 import { CustomerView } from './components/customer/CustomerView';
 import { PINModal } from './components/admin/PINModal';
@@ -46,6 +47,10 @@ function safeLazy<T extends React.ComponentType<any>>(importFunc: () => Promise<
       console.error("Chunk load failed, attempting recovery reload...", error);
       const hasReloaded = sessionStorage.getItem('just_dosa_chunk_reload_attempted');
       if (!hasReloaded) {
+        // Only capture on the first attempt, before the auto-reload -- so we
+        // can see how often this genuinely happens rather than double-counting
+        // the retry too.
+        Sentry.captureException(error, { tags: { isChunkError: true } });
         sessionStorage.setItem('just_dosa_chunk_reload_attempted', 'true');
         window.location.reload();
         return new Promise<{ default: T }>(() => {});

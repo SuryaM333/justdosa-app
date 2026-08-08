@@ -1,14 +1,15 @@
 import React from 'react';
-import { Users, Clock, Flame, RotateCcw, BarChart3, TrendingUp, Sparkles } from 'lucide-react';
+import { Users, Clock, Flame, RotateCcw, BarChart3, TrendingUp, Sparkles, Table2 } from 'lucide-react';
 import { DailyStats } from '../../types';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import { ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { dataService } from '../../services/dataService';
 
 interface SummaryTabProps {
   stats: DailyStats;
+  turnTrends: ReturnType<typeof dataService.getTableTurnTrends>;
 }
 
-export const SummaryTab: React.FC<SummaryTabProps> = ({ stats }) => {
+export const SummaryTab: React.FC<SummaryTabProps> = ({ stats, turnTrends }) => {
   const getFormattedHours = () => {
     const formatTime = (timeStr: string) => {
       const [h, m] = timeStr.split(':').map(Number);
@@ -44,14 +45,22 @@ export const SummaryTab: React.FC<SummaryTabProps> = ({ stats }) => {
         </div>
         <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20 text-center shrink-0">
           <span className="text-[10px] uppercase font-bold text-amber-100 block mb-0.5">
-            Operational Efficiency
+            Fulfillment Rate
           </span>
           <div className="text-3xl font-black font-mono">
-            94.8%
+            {stats.fulfillmentRatePct !== null ? `${stats.fulfillmentRatePct}%` : '—'}
           </div>
           <span className="text-[10px] text-emerald-300 font-semibold flex items-center justify-center gap-1 mt-0.5">
             <TrendingUp className="w-3 h-3" />
-            <span>Optimal Table Flow</span>
+            <span>
+              {stats.fulfillmentRatePct === null
+                ? 'No bookings yet today'
+                : stats.fulfillmentRatePct >= 90
+                ? 'Optimal Table Flow'
+                : stats.fulfillmentRatePct >= 70
+                ? 'Steady Table Flow'
+                : 'Review No-Shows / Cancellations'}
+            </span>
           </span>
         </div>
       </div>
@@ -170,6 +179,92 @@ export const SummaryTab: React.FC<SummaryTabProps> = ({ stats }) => {
             </BarChart>
           </ResponsiveContainer>
         </div>
+      </div>
+
+      {/* Table Turn Time Trend (last 7 days) */}
+      <div className="bg-white dark:bg-[#26221E] rounded-3xl p-6 border border-[#E8E2D2] dark:border-[#3D352E] shadow-sm">
+        <div className="flex items-center gap-2 pb-4 mb-6 border-b border-[#E8E2D2] dark:border-[#3D352E]">
+          <div className="w-8 h-8 rounded-lg bg-[#F5F2EA] dark:bg-[#1C1917] flex items-center justify-center text-[#E37A08]">
+            <TrendingUp className="w-4 h-4" />
+          </div>
+          <div>
+            <h3 className="font-serif font-bold text-base text-[#2D2926] dark:text-white">
+              Table Turn Time Trend (Last 7 Days)
+            </h3>
+            <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0]">
+              Average minutes from seating to finish, by day — spot whether turns are speeding up or slowing down.
+            </p>
+          </div>
+        </div>
+
+        {turnTrends.daily.length === 0 ? (
+          <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0] italic py-8 text-center">
+            No finished parties in the last 7 days yet.
+          </p>
+        ) : (
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={turnTrends.daily} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#888888" opacity={0.2} />
+                <XAxis dataKey="date" stroke="#888888" fontSize={12} tickLine={false} axisLine={false} />
+                <YAxis stroke="#888888" fontSize={12} tickLine={false} axisLine={false} allowDecimals={false} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#26221E',
+                    borderRadius: '12px',
+                    border: '1px solid #3D352E',
+                    color: '#fff',
+                    fontSize: '12px',
+                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.3)',
+                  }}
+                  formatter={(value: unknown, _name: unknown, props: any) => [
+                    `${value}m avg (${props.payload.partiesFinished} ${props.payload.partiesFinished === 1 ? 'party' : 'parties'})`,
+                    'Turn Time',
+                  ]}
+                />
+                <Line type="monotone" dataKey="avgTurnMinutes" stroke="#E37A08" strokeWidth={2.5} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      {/* Turn Time by Table (last 7 days) */}
+      <div className="bg-white dark:bg-[#26221E] rounded-3xl p-6 border border-[#E8E2D2] dark:border-[#3D352E] shadow-sm">
+        <div className="flex items-center gap-2 pb-4 mb-6 border-b border-[#E8E2D2] dark:border-[#3D352E]">
+          <div className="w-8 h-8 rounded-lg bg-[#F5F2EA] dark:bg-[#1C1917] flex items-center justify-center text-[#E37A08]">
+            <Table2 className="w-4 h-4" />
+          </div>
+          <div>
+            <h3 className="font-serif font-bold text-base text-[#2D2926] dark:text-white">
+              Turn Time by Table (Last 7 Days)
+            </h3>
+            <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0]">
+              Slowest tables first — a real signal for layout, table-size, or staffing decisions.
+            </p>
+          </div>
+        </div>
+
+        {turnTrends.byTable.length === 0 ? (
+          <p className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0] italic py-8 text-center">
+            No finished parties in the last 7 days yet.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {turnTrends.byTable.map((t) => (
+              <div
+                key={t.tableId}
+                className="flex items-center justify-between p-3 rounded-xl bg-[#F5F2EA] dark:bg-[#1C1917] border border-[#E8E2D2] dark:border-[#3D352E]"
+              >
+                <span className="text-xs font-bold text-[#2D2926] dark:text-white">{t.tableName}</span>
+                <span className="text-xs text-[#6B5E4C] dark:text-[#B8ACA0]">
+                  {t.partiesFinished} {t.partiesFinished === 1 ? 'party' : 'parties'}
+                </span>
+                <span className="text-sm font-black text-[#E37A08] font-mono">{t.avgTurnMinutes}m</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Info Box */}

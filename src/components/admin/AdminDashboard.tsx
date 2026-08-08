@@ -233,6 +233,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole }) => 
   }, [adminRole, activeTab]);
 
   const stats = dataService.getDailyStats();
+  const tableTurnTrends = dataService.getTableTurnTrends(7);
 
   if (shouldShowStaffGrid) {
     return (
@@ -511,7 +512,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ adminRole }) => 
             <CustomersTab customers={customers} bookings={bookings} adminRole={adminRole} onRefresh={loadData} />
           )}
 
-          {activeTab === 'summary' && adminRole === 'owner' && <SummaryTab stats={stats} />}
+          {activeTab === 'summary' && adminRole === 'owner' && <SummaryTab stats={stats} turnTrends={tableTurnTrends} />}
 
           {activeTab === 'settings' && adminRole === 'owner' && <SettingsTab />}
         </div>

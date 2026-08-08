@@ -110,6 +110,8 @@ export interface DailyStats {
   avgWaitTimeMinutes: number;
   busiestHour: string;
   avgTableTurnMinutes: number;
+  /** null when there's no data yet today (not 0 -- 0% fulfillment and "no data" are different states). */
+  fulfillmentRatePct: number | null;
   hourlyBookings: { hour: string; count: number }[];
 }
 

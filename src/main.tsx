@@ -1,8 +1,19 @@
 import React, { StrictMode, Component, ErrorInfo, ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
+import * as Sentry from '@sentry/react';
 import App from './App.tsx';
 import { LOGO_BASE64 } from './components/logoBase64';
 import './index.css';
+
+// No-ops entirely until VITE_SENTRY_DSN is set (e.g. in Vercel's env vars) --
+// same defensive import.meta.env pattern as VITE_APP_MODE / VITE_USE_FIRESTORE_EMULATOR.
+const SENTRY_DSN = (import.meta as any).env?.VITE_SENTRY_DSN;
+if (SENTRY_DSN) {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    environment: (import.meta as any).env?.MODE,
+  });
+}
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -26,14 +37,21 @@ class GlobalErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySta
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('GlobalErrorBoundary caught an uncaught error:', error, errorInfo);
-    
+
     // Check if this is a chunk failure or dynamic import failure
     const message = error.message || '';
-    const isChunkError = 
+    const isChunkError =
       message.includes('dynamically imported module') ||
       message.includes('Loading chunk') ||
       message.includes('ChunkLoadError') ||
       message.includes('Failed to fetch');
+
+    if (SENTRY_DSN) {
+      Sentry.captureException(error, {
+        extra: { componentStack: errorInfo.componentStack },
+        tags: { isChunkError },
+      });
+    }
 
     if (isChunkError) {
       const hasReloaded = sessionStorage.getItem('just_dosa_chunk_reload_attempted');

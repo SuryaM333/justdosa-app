@@ -2,6 +2,7 @@ import { Booking, Customer, DailyStats, Table, LandmarkPosition } from '../types
 import { smsService } from './smsService';
 import { cleanPhoneNumber, formatAusMobile } from '../utils/phone';
 import { parseToDate, getLocalDateStr, getLocalTimeMins } from '../utils/dateUtils';
+import * as Sentry from '@sentry/react';
 
 export interface CustomerSuggestion {
   phone: string;
@@ -133,9 +134,14 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   }
 
   console.error('Firestore Error: ', JSON.stringify(errInfo));
+  // Write failures are real incidents worth alerting on (unlike the GET/LIST
+  // offline-sync noise above, which is routine and handled separately).
+  // Safe to call even when Sentry.init() was never run (no VITE_SENTRY_DSN) --
+  // the SDK no-ops until initialized.
+  Sentry.captureException(error, { tags: { operationType, path: path || 'unknown' } });
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('justDosaWriteError', { 
-      detail: { message: "Something went wrong, please try again or see staff." } 
+    window.dispatchEvent(new CustomEvent('justDosaWriteError', {
+      detail: { message: "Something went wrong, please try again or see staff." }
     }));
   }
   throw new Error(JSON.stringify(errInfo));
@@ -2709,7 +2715,7 @@ export const dataService = {
       const waitMs = seatedD.getTime() - createdD.getTime();
       totalWaitMins += Math.max(1, Math.round(waitMs / 60000));
     });
-    const avgWaitTimeMinutes = seatedWalkIns.length > 0 ? Math.round(totalWaitMins / seatedWalkIns.length) : 18;
+    const avgWaitTimeMinutes = seatedWalkIns.length > 0 ? Math.round(totalWaitMins / seatedWalkIns.length) : 0;
 
     const finishedParties = todayBookings.filter((b) => b.finishedAt && b.seatedAt);
     let totalTurnMins = 0;
@@ -2720,11 +2726,13 @@ export const dataService = {
       const turnMs = finishedD.getTime() - seatedD.getTime();
       totalTurnMins += Math.max(10, Math.round(turnMs / 60000));
     });
-    const avgTableTurnMinutes = finishedParties.length > 0 ? Math.round(totalTurnMins / finishedParties.length) : 42;
+    const avgTableTurnMinutes = finishedParties.length > 0 ? Math.round(totalTurnMins / finishedParties.length) : 0;
 
+    // Real hourly distribution only -- no pre-seeded baseline. A quiet day
+    // should visibly look quiet, not be padded up to look like a busy one.
     const hoursMap: Record<string, number> = {
-      '11:00': 0, '12:00': 3, '13:00': 7, '14:00': 4,
-      '17:00': 5, '18:00': 9, '19:00': 14, '20:00': 11, '21:00': 6
+      '11:00': 0, '12:00': 0, '13:00': 0, '14:00': 0,
+      '17:00': 0, '18:00': 0, '19:00': 0, '20:00': 0, '21:00': 0
     };
 
     todayBookings.forEach((b) => {
@@ -2738,7 +2746,7 @@ export const dataService = {
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([hour, count]) => ({ hour, count }));
 
-    let busiestHour = '19:00';
+    let busiestHour: string | null = null;
     let maxCount = 0;
     hourlyBookings.forEach((hb) => {
       if (hb.count > maxCount) {
@@ -2747,13 +2755,92 @@ export const dataService = {
       }
     });
 
+    // Fulfillment rate: of everything that came in today (already excludes
+    // cancelled/no-show, see the todayBookings filter above), how much
+    // actually got seated? A genuine, computed "is service running smoothly"
+    // proxy -- replaces what used to be a hardcoded 94.8% in SummaryTab.
+    const seatedOrFinishedCount = todayBookings.filter((b) => b.status === 'seated' || b.status === 'finished').length;
+    const fulfillmentRatePct = todayBookings.length > 0 ? Math.round((seatedOrFinishedCount / todayBookings.length) * 100) : null;
+
     return {
-      totalServedToday: totalServedToday || 28,
+      totalServedToday,
       avgWaitTimeMinutes,
-      busiestHour: `${busiestHour} (${maxCount} parties)`,
+      busiestHour: busiestHour ? `${busiestHour} (${maxCount} parties)` : 'No data yet',
       avgTableTurnMinutes,
+      fulfillmentRatePct,
       hourlyBookings,
     };
+  },
+
+  // Multi-day table turn-time view -- getDailyStats()'s "Avg Table Turn" is
+  // today-only, which can't show whether turns are trending faster/slower
+  // or which physical tables are the actual bottleneck. Reads from the same
+  // already-synced cachedBookings as every other stat here (no extra
+  // Firestore query) -- note this gets more expensive once the full-
+  // collection sync is date-scoped (separate, not-yet-done checklist item).
+  getTableTurnTrends(days: number = 7): {
+    daily: { date: string; avgTurnMinutes: number; partiesFinished: number }[];
+    byTable: { tableId: number; tableName: string; avgTurnMinutes: number; partiesFinished: number }[];
+  } {
+    const bookings = this.getBookings();
+    const tables = this.getTables();
+    const tableNameById = new Map<number, string>(tables.map((t) => [t.id, t.name]));
+
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - (days - 1));
+    cutoff.setHours(0, 0, 0, 0);
+
+    const finishedInWindow = bookings.filter((b) => {
+      if (!b.finishedAt || !b.seatedAt || !b.tableId) return false;
+      const finishedD = parseToDate(b.finishedAt);
+      return finishedD ? finishedD >= cutoff : false;
+    });
+
+    const turnMinutesOf = (b: Booking): number | null => {
+      const finishedD = parseToDate(b.finishedAt);
+      const seatedD = parseToDate(b.seatedAt);
+      if (!finishedD || !seatedD) return null;
+      return Math.max(10, Math.round((finishedD.getTime() - seatedD.getTime()) / 60000));
+    };
+
+    const byDate = new Map<string, { totalMins: number; count: number }>();
+    const byTable = new Map<number, { totalMins: number; count: number }>();
+
+    finishedInWindow.forEach((b) => {
+      const mins = turnMinutesOf(b);
+      if (mins === null) return;
+
+      const finishedD = parseToDate(b.finishedAt)!;
+      const dateStr = getLocalDateStr(finishedD);
+      const dateEntry = byDate.get(dateStr) || { totalMins: 0, count: 0 };
+      dateEntry.totalMins += mins;
+      dateEntry.count += 1;
+      byDate.set(dateStr, dateEntry);
+
+      const tableEntry = byTable.get(b.tableId!) || { totalMins: 0, count: 0 };
+      tableEntry.totalMins += mins;
+      tableEntry.count += 1;
+      byTable.set(b.tableId!, tableEntry);
+    });
+
+    const daily = Array.from(byDate.entries())
+      .map(([date, { totalMins, count }]) => ({
+        date,
+        avgTurnMinutes: Math.round(totalMins / count),
+        partiesFinished: count,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    const byTableArr = Array.from(byTable.entries())
+      .map(([tableId, { totalMins, count }]) => ({
+        tableId,
+        tableName: tableNameById.get(tableId) || `Table ${tableId}`,
+        avgTurnMinutes: Math.round(totalMins / count),
+        partiesFinished: count,
+      }))
+      .sort((a, b) => b.avgTurnMinutes - a.avgTurnMinutes);
+
+    return { daily, byTable: byTableArr };
   },
 
   async deleteCustomer(phoneKey: string) {
