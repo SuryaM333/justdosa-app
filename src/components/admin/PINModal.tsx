@@ -143,7 +143,11 @@ export const PINModal: React.FC<PINModalProps> = ({
     <div 
       className="fixed inset-0 z-50 flex flex-col items-center justify-center p-4 overflow-hidden font-sans select-none text-white bg-stone-950"
       style={{
-        backgroundImage: "url('https://images.unsplash.com/photo-1668236543090-82eba5ee5976?auto=format&fit=crop&w=1920&q=80')",
+        // w=1280&q=40 (down from w=1920&q=80): this sits under a heavy
+        // bg-black/85-90 overlay the whole time, so the extra resolution and
+        // quality were invisible — auto=format still lets Unsplash serve
+        // WebP/AVIF per the browser's Accept header.
+        backgroundImage: "url('https://images.unsplash.com/photo-1668236543090-82eba5ee5976?auto=format&fit=crop&w=1280&q=40')",
         backgroundSize: 'cover',
         backgroundPosition: 'center',
       }}
